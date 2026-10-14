@@ -1,0 +1,139 @@
+import { useEffect, useState } from 'react'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import {
+  IconActivity,
+  IconCube,
+  IconGrid,
+  IconPlug,
+  IconPulse,
+  IconRefresh,
+  IconSettings,
+  IconTicket,
+  IconUsers,
+  IconWallet,
+  IconGauge,
+} from './Icons'
+import { BrandName } from '../components/BrandName'
+import './AdminLayout.css'
+
+const sections = [
+  { to: '/admin', label: 'Dashboard', end: true, icon: IconGrid },
+  { to: '/admin/users', label: 'Users', end: false, icon: IconUsers },
+  { to: '/admin/providers', label: 'Providers', end: false, icon: IconPlug },
+  { to: '/admin/models', label: 'Models', end: false, icon: IconCube },
+  { to: '/admin/balances', label: 'Balances', end: false, icon: IconWallet },
+  { to: '/admin/promos', label: 'Promo Codes', end: false, icon: IconTicket },
+  { to: '/admin/settings', label: 'Settings', end: false, icon: IconSettings },
+  { to: '/admin/rpm', label: 'RPM', end: false, icon: IconGauge },
+  { to: '/admin/subscriptions', label: 'Subscriptions', end: false, icon: IconRefresh },
+  { to: '/admin/usage', label: 'Usage', end: false, icon: IconPulse },
+  { to: '/admin/statistics', label: 'Statistics', end: false, icon: IconActivity }, 
+]
+
+export function AdminLayout() {
+  const location = useLocation()
+  const [menuOpen, setMenuOpen] = useState(false)
+
+  useEffect(() => {
+    setMenuOpen(false)
+  }, [location.pathname])
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false)
+    }
+    document.addEventListener('keydown', onKey)
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.body.style.overflow = previousOverflow
+    }
+  }, [menuOpen])
+
+  return (
+    <div className={`admin-shell ${menuOpen ? 'menu-open' : ''}`}>
+      <button
+        className="admin-nav-backdrop"
+        type="button"
+        aria-label="Close menu"
+        tabIndex={menuOpen ? 0 : -1}
+        onClick={() => setMenuOpen(false)}
+      />
+
+      <aside className="admin-sidebar" id="admin-sidebar">
+        <div className="admin-brand">
+          <div className="brand-mark" aria-hidden>
+            <img src="/brand/mark.png" alt="" />
+          </div>
+          <div>
+            <strong><BrandName /></strong>
+            <small>Control plane</small>
+          </div>
+          <button
+            className="admin-sidebar-close"
+            type="button"
+            aria-label="Close menu"
+            onClick={() => setMenuOpen(false)}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="admin-nav-label">Workspace</div>
+        <nav className="admin-nav">
+          {sections.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              className={({ isActive }) => `admin-nav-item ${isActive ? 'is-active' : ''}`}
+            >
+              <item.icon size={17} />
+              <span>{item.label}</span>
+            </NavLink>
+          ))}
+        </nav>
+      </aside>
+
+      <div className="admin-main-wrap">
+        <header className="admin-topbar">
+          <button
+            className="admin-burger-btn"
+            type="button"
+            aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+            aria-expanded={menuOpen}
+            aria-controls="admin-sidebar"
+            onClick={() => setMenuOpen((open) => !open)}
+          >
+            <span className={`admin-burger-icon ${menuOpen ? 'is-open' : ''}`} aria-hidden>
+              <i />
+              <i />
+              <i />
+            </span>
+          </button>
+
+          <div className="admin-topbar-brand">
+            <div className="brand-mark" aria-hidden>
+              <img src="/brand/mark.png" alt="" />
+            </div>
+            <strong><BrandName /></strong>
+          </div>
+
+          <div className="admin-breadcrumb">
+            <span><BrandName /></span>
+            <b>/</b>
+            <strong>Admin console</strong>
+          </div>
+          <div className="admin-top-actions" />
+        </header>
+        <main className="admin-content">
+          <Outlet />
+        </main>
+      </div>
+    </div>
+  )
+}

@@ -1,0 +1,484 @@
+/* ==========================================================================
+   Models Catalog & Pricing — High-Performance Data Table & Strips
+   ========================================================================== */
+
+.models-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 100%;
+  max-width: 1340px;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.models-page-header {
+  margin-bottom: 0;
+}
+
+.models-page-header h1 {
+  font-size: 26px;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  color: #f8fafc;
+  margin: 0;
+}
+
+.models-page-header p {
+  margin: 4px 0 0;
+  font-size: 13.5px;
+  color: #94a3b8;
+}
+
+/* 1. Floating Provider Tabs Bar */
+.models-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  margin-bottom: 2px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.models-provider-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(14, 18, 24, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 4px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+}
+
+.models-provider-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.models-provider-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+              color 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  flex-shrink: 0;
+}
+
+.models-provider-tab:focus {
+  outline: none;
+}
+
+@media (hover: hover) {
+  .models-provider-tab:not(.is-active):hover {
+    color: #f1f5f9;
+    background: rgba(255, 255, 255, 0.05);
+  }
+}
+
+.models-provider-tab:not(.is-active) {
+  background: transparent !important;
+  color: #94a3b8 !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.models-provider-tab.is-active {
+  color: #071018 !important;
+  border-color: transparent !important;
+  background: linear-gradient(180deg, #dcc4ff 0%, #b388ff 55%, #9a6ef0 100%) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 8px 18px rgba(179, 136, 255, 0.28) !important;
+}
+
+
+/* ==========================================================================
+   2. Modern High-Tech Models Table (Strips / Rows)
+   ========================================================================== */
+.models-table-container {
+  width: 100%;
+  border-radius: 16px;
+  background: #12151c;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 6px 30px rgba(0, 0, 0, 0.3);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  box-sizing: border-box;
+}
+
+.models-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  text-align: left;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.models-table thead th {
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.th-name { width: 30%; }
+.th-ctx { width: 11%; }
+.th-price { width: 13%; }
+.th-ratio { width: 15%; }
+.th-uptime { width: 11%; }
+.th-action { width: 10%; text-align: right; }
+
+.model-row {
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.model-row td {
+  padding: 13px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  vertical-align: middle;
+}
+
+.model-row:last-child td {
+  border-bottom: none;
+}
+
+.model-row:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+/* Name Column */
+.model-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.model-cell-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.model-cell-icon .provider-brand-icon {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: block;
+  border-radius: inherit;
+  padding: 3px;
+  box-sizing: border-box;
+}
+
+.model-row-free .model-cell-icon { background: rgba(179, 136, 255, 0.1); border-color: rgba(179, 136, 255, 0.25); }
+.model-row-openai .model-cell-icon { background: rgba(96, 165, 250, 0.1); border-color: rgba(96, 165, 250, 0.25); }
+.model-row-anthropic .model-cell-icon { background: rgba(251, 146, 60, 0.1); border-color: rgba(251, 146, 60, 0.25); }
+.model-row-gemini .model-cell-icon { background: rgba(234, 179, 8, 0.1); border-color: rgba(234, 179, 8, 0.25); }
+.model-row-deepseek .model-cell-icon { background: rgba(56, 189, 248, 0.1); border-color: rgba(56, 189, 248, 0.25); }
+
+.model-name-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.model-cell-title {
+  font-size: 14.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #f8fafc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.model-cell-id-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.model-cell-code {
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.model-cell-copy {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.15s ease;
+}
+
+.model-cell-copy:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #b388ff;
+}
+
+.model-cell-copy.is-copied {
+  color: #34d399;
+}
+
+/* Context Badge */
+.model-cell-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+  font-weight: 600;
+  color: #cbd5e1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Rates & Prices */
+.model-cell-rate {
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: #f1f5f9;
+  white-space: nowrap;
+}
+
+.model-cell-rate strong {
+  font-weight: 750;
+  color: #b388ff;
+}
+
+.is-free .model-cell-rate strong {
+  color: #34d399;
+}
+
+
+
+.price-event {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.price-event s {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.price-event em {
+  font-style: normal;
+  color: #34d399;
+}
+
+.price-event-pct {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: #f59e0b;
+}
+
+/* Uptime Column & Badge */
+.model-uptime-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.model-uptime-badge.is-good {
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+.model-uptime-badge.is-good .uptime-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 6px #10b981;
+}
+
+.model-uptime-badge.is-mid {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+}
+.model-uptime-badge.is-mid .uptime-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #f59e0b;
+}
+
+.model-uptime-badge.is-poor {
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+.model-uptime-badge.is-poor .uptime-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #ef4444;
+}
+
+/* Ratio Column */
+.model-cell-ratio {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(179, 136, 255, 0.07);
+  border: 1px solid rgba(179, 136, 255, 0.16);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #c9a8ff;
+  white-space: nowrap;
+}
+
+.model-cell-ratio.is-free {
+  background: rgba(16, 185, 129, 0.08);
+  border-color: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+}
+
+/* More Button */
+.td-action {
+  text-align: right;
+}
+
+.model-more-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 13px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.model-more-btn:hover {
+  background: rgba(179, 136, 255, 0.15);
+  border-color: rgba(179, 136, 255, 0.4);
+  color: #b388ff;
+  transform: translateY(-1px);
+}
+
+.empty-state {
+  margin-top: 20px;
+  padding: 32px 20px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  border-radius: 14px;
+  background: #12151b;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.empty-state p {
+  margin: 0;
+  font-size: 13.5px;
+  color: #94a3b8;
+}
+
+/* ==========================================================================
+   Responsive Adaptations
+   ========================================================================== */
+@media (max-width: 768px) {
+  .models-table thead th {
+    padding: 10px 12px;
+    font-size: 10px;
+  }
+
+  .model-row td {
+    padding: 10px 12px;
+  }
+
+  .model-cell-title {
+    font-size: 13.5px;
+  }
+
+  .model-more-btn {
+    height: 28px;
+    padding: 0 10px;
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 640px) {
+  .models-toolbar {
+    margin-bottom: 2px;
+  }
+
+  .models-provider-bar {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 3px;
+  }
+
+  .models-page-header h1 {
+    font-size: 22px;
+  }
+}

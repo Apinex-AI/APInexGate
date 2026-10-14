@@ -1,0 +1,54 @@
+# Logs
+logs
+*.log
+*.mp4
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+dist-server
+*.local
+.env
+.env.*
+!.env.example
+
+# Private outbound proxy credentials — never commit.
+proxy.txt
+
+# Operator catalog exports contain upstream secrets. rsync deploy still copies them.
+providers.json
+models.json
+
+# SEO build cache (regenerated on every build)
+scripts/.seo-build-meta.json
+scripts/showreel.html
+scripts/render-showreel.py
+public/examples/
+
+# SQLite — never commit live DB or WAL sidecars.
+# Deploy must NOT rsync data/*.sqlite over a running API (corrupts WAL DBs).
+data/*.sqlite
+data/*.sqlite-shm
+data/*.sqlite-wal
+data/*.sqlite-journal
+# Runtime activity logs — local only, never commit.
+data/activity-logs/
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite-journal
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

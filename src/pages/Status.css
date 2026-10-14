@@ -1,0 +1,474 @@
+/* ==========================================================================
+   Status Page — Real-Time Telemetry & Uptime Monitor
+   ========================================================================== */
+
+.status-page {
+  max-width: 1140px;
+  margin: 0 auto;
+  padding: 32px 24px 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.content .status-page {
+  max-width: 100%;
+  padding: 4px 0 60px;
+}
+
+/* 1. Global Status Hero Card */
+.status-hero-card {
+  position: relative;
+  overflow: hidden;
+  padding: 28px 30px;
+  border-radius: 20px;
+  background:
+    radial-gradient(600px 240px at 0% 0%, rgba(179, 136, 255, 0.15), transparent 60%),
+    radial-gradient(420px 200px at 100% 0%, rgba(129, 140, 248, 0.12), transparent 60%),
+    linear-gradient(150deg, rgba(20, 26, 38, 0.95), rgba(12, 16, 24, 0.98));
+  border: 1px solid rgba(179, 136, 255, 0.22);
+  box-shadow:
+    0 20px 48px rgba(0, 0, 0, 0.45),
+    0 0 32px rgba(179, 136, 255, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.status-hero-main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.status-health-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.status-health-pill.is-operational {
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: #34d399;
+}
+
+.status-health-pill.is-warning {
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+}
+
+.status-pulse-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.status-pulse-dot.is-operational {
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.28);
+}
+
+.status-pulse-dot.is-warning {
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.28);
+}
+
+.status-hero-main h1 {
+  margin: 0;
+  font-size: clamp(26px, 3.8vw, 36px);
+  font-weight: 850;
+  letter-spacing: -0.03em;
+  color: #f8fafc;
+}
+
+.status-hero-main p {
+  margin: 0;
+  font-size: 14px;
+  color: #94a3b8;
+  max-width: 620px;
+  line-height: 1.5;
+}
+
+/* Metrics Grid in Hero */
+.status-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+@media (max-width: 680px) {
+  .status-metrics-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.status-metric-box {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.status-metric-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.status-metric-value {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: #f8fafc;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-metric-sub {
+  font-size: 11.5px;
+  color: #64748b;
+}
+
+/* 2. Provider Filter Pills */
+.status-filters-wrap {
+  position: relative;
+  overflow: visible;
+}
+
+.status-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.status-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 9999px !important;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: #d5dbe3;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none !important;
+  -webkit-tap-highlight-color: transparent;
+  transition: all 0.18s ease;
+  overflow: hidden;
+}
+
+.status-filter-btn:focus,
+.status-filter-btn:focus-visible {
+  outline: none !important;
+}
+
+.status-filter-btn:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #f1f5f9;
+}
+
+.status-filter-btn.is-active {
+  border: 1px solid transparent;
+  border-radius: 9999px !important;
+  color: #071018;
+  background: linear-gradient(180deg, #dcc4ff 0%, #b388ff 55%, #9a6ef0 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 4px 14px rgba(179, 136, 255, 0.3);
+}
+
+.status-filter-btn.is-active:focus,
+.status-filter-btn.is-active:focus-visible {
+  outline: none !important;
+}
+
+.status-filter-count {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 9999px !important;
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+}
+
+.status-filter-btn.is-active .status-filter-count {
+  background: rgba(0, 0, 0, 0.15);
+  color: #071018;
+}
+
+/* 3. Status Rows / Cards */
+.status-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.status-row-card {
+  display: grid;
+  grid-template-columns: minmax(200px, 260px) minmax(0, 1fr) 130px;
+  gap: 20px;
+  align-items: center;
+  padding: 14px 18px;
+  border-radius: 16px;
+  background: linear-gradient(150deg, rgba(20, 26, 38, 0.95), rgba(12, 16, 24, 0.98));
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.22);
+  transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.status-row-card:hover {
+  border-color: rgba(179, 136, 255, 0.25);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+}
+
+@media (max-width: 860px) {
+  .status-row-card {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+}
+
+.status-row-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.status-model-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  flex-shrink: 0;
+}
+
+.status-model-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.status-model-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.status-model-title-wrap strong {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #f8fafc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status-provider-tag {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #94a3b8;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.status-model-text code {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Timeline & Bars */
+.status-timeline-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.status-bars {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-end;
+  gap: 2px;
+  height: 26px;
+  overflow: hidden;
+  padding: 2px 0;
+}
+
+.status-bar {
+  flex: 1 1 0;
+  min-width: 2px;
+  max-width: 5px;
+  height: 22px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.status-bar:hover {
+  transform: scaleY(1.15);
+  opacity: 1;
+}
+
+.status-bar.is-up {
+  background: #10b981;
+}
+
+.status-bar.is-load {
+  background: #f59e0b;
+}
+
+.status-bar.is-partial {
+  background: #fbbf24;
+}
+
+.status-bar.is-down {
+  background: #f87171;
+  box-shadow: 0 0 6px rgba(248, 113, 113, 0.4);
+}
+
+.status-timeline-legend {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10.5px;
+  color: #64748b;
+  font-weight: 550;
+  user-select: none;
+}
+
+/* Row Meta (State & Uptime) */
+.status-row-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+@media (max-width: 860px) {
+  .status-row-meta {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    padding-top: 8px;
+  }
+}
+
+.status-state-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.state-indicator-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+
+.status-state-pill.is-operational {
+  background: rgba(16, 185, 129, 0.12);
+  color: #34d399;
+}
+.status-state-pill.is-operational .state-indicator-dot {
+  background: #10b981;
+}
+
+.status-state-pill.is-degraded,
+.status-state-pill.is-partial {
+  background: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
+}
+.status-state-pill.is-degraded .state-indicator-dot,
+.status-state-pill.is-partial .state-indicator-dot {
+  background: #f59e0b;
+}
+
+.status-state-pill.is-outage {
+  background: rgba(239, 68, 68, 0.12);
+  color: #f87171;
+}
+.status-state-pill.is-outage .state-indicator-dot {
+  background: #ef4444;
+}
+
+.status-state-pill.is-unknown {
+  background: rgba(255, 255, 255, 0.06);
+  color: #94a3b8;
+}
+.status-state-pill.is-unknown .state-indicator-dot {
+  background: #64748b;
+}
+
+.status-uptime-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.status-uptime-stat strong {
+  font-size: 14px;
+  font-weight: 750;
+  color: #f1f5f9;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-uptime-stat small {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.status-muted {
+  color: #94a3b8;
+  font-size: 13.5px;
+  text-align: center;
+  padding: 30px;
+}
+
+.status-error {
+  color: #f87171;
+  font-size: 13.5px;
+  text-align: center;
+  padding: 16px;
+  border-radius: 12px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}

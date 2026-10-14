@@ -1,0 +1,144 @@
+.admin-loading {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+}
+
+.admin-login {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.admin-login-card {
+  width: min(430px, 100%);
+  padding: 32px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  color: var(--text);
+}
+
+.admin-login-card .input {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.admin-login-card .btn-primary {
+  color: #071018;
+}
+
+.admin-login-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 40px;
+}
+
+.admin-login-brand strong {
+  display: block;
+  font-size: 17px;
+  letter-spacing: -0.03em;
+}
+
+.admin-login-brand small {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.admin-login-copy h1 {
+  margin-top: 6px;
+  font-size: 28px;
+  letter-spacing: -0.04em;
+  line-height: 1.15;
+}
+
+.admin-login-copy p {
+  margin-top: 10px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.admin-login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 26px;
+}
+
+.admin-login-form .btn {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.admin-login-error {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.admin-login-foot {
+  margin-top: 20px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.admin-login-pending {
+  margin-top: 26px;
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+}
+
+.admin-login-pending-pulse {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 0 rgba(179, 136, 255, 0.55);
+  animation: admin-login-pulse 1.4s ease-out infinite;
+}
+
+@keyframes admin-login-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(179, 136, 255, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 12px rgba(179, 136, 255, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(179, 136, 255, 0);
+  }
+}
+
+.admin-login-pending-copy {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.admin-login-pending-meta {
+  margin: 0;
+  font-size: 12px;
+}
+
+.admin-login-pending-meta code {
+  font-size: 11px;
+}
+
+.admin-login-pending .btn {
+  width: 100%;
+  margin-top: 4px;
+}

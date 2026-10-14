@@ -1,0 +1,108 @@
+.toast-stack {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  z-index: 20000;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+  width: min(440px, calc(100vw - 28px));
+}
+
+.toast {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  max-width: 100%;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: rgba(18, 22, 28, 0.95);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  font-size: 13.5px;
+  font-weight: 550;
+  letter-spacing: -0.01em;
+  color: #f1f5f9;
+  pointer-events: auto;
+  animation: toast-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.toast::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent);
+  pointer-events: none;
+}
+
+.toast-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  transform: rotate(45deg);
+}
+
+.toast-success {
+  border-color: rgba(179, 136, 255, 0.28);
+}
+
+.toast-success .toast-dot {
+  background: #b388ff;
+  box-shadow: 0 0 8px rgba(179, 136, 255, 0.6);
+}
+
+.toast-info {
+  border-color: rgba(167, 139, 250, 0.25);
+}
+
+.toast-info .toast-dot {
+  background: #a78bfa;
+  box-shadow: 0 0 8px rgba(167, 139, 250, 0.5);
+}
+
+.toast-error {
+  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(28, 16, 18, 0.96);
+}
+
+.toast-error .toast-dot {
+  background: #ef4444;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 480px) {
+  .toast-stack {
+    bottom: max(16px, env(safe-area-inset-bottom));
+    width: calc(100vw - 24px);
+    gap: 6px;
+  }
+
+  .toast {
+    width: 100%;
+    padding: 10px 14px;
+    border-radius: 9px;
+    font-size: 13px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+}

@@ -1,0 +1,1189 @@
+/* ==========================================================================
+   Dashboard Overview V2 — Next-Gen AI Gateway Operations Studio
+   ========================================================================== */
+
+.rewards-redeem-modal {
+  display: grid;
+  gap: 22px;
+}
+
+.rewards-redeem-modal .rewards-link-field {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.rewards-redeem-modal .rewards-captcha {
+  margin: 8px 0 4px;
+}
+
+.rewards-redeem-modal .rewards-submit-btn {
+  margin-top: 6px;
+}
+
+.dashboard-v2 {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 100%;
+  max-width: 1340px;
+  margin: 0 auto;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  padding-bottom: 40px;
+}
+
+/* 1. Futuristic Mission Control Header */
+.ov-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding: 4px 0 6px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.ov-header-main {
+  flex: 1 1 380px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ov-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ov-badge-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: fit-content;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.24);
+  color: #34d399;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.ov-badge-status .live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.28);
+}
+
+.ov-title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  color: #f8fafc;
+}
+
+.ov-subtitle {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: #94a3b8;
+  max-width: 640px;
+}
+
+.ov-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ov-btn-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.035);
+  color: #cbd5e1;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.ov-btn-pill:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.ov-btn-tg {
+  color: #b388ff;
+  border-color: rgba(179, 136, 255, 0.25);
+  background: rgba(179, 136, 255, 0.06);
+  text-decoration: none;
+}
+
+.ov-btn-tg:hover {
+  color: #c9a8ff;
+  border-color: rgba(179, 136, 255, 0.45);
+  background: rgba(179, 136, 255, 0.12);
+}
+
+.ov-btn-tg.is-verified {
+  color: #4ade80;
+  border-color: rgba(34, 197, 94, 0.25);
+  background: rgba(34, 197, 94, 0.06);
+}
+
+.ov-btn-tg.is-verified:hover {
+  color: #86efac;
+  border-color: rgba(34, 197, 94, 0.4);
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.ov-btn-redeem {
+  border-color: rgba(167, 139, 250, 0.3);
+  background: rgba(167, 139, 250, 0.08);
+  color: #c9a8ff;
+}
+
+.ov-btn-redeem:hover {
+  background: rgba(167, 139, 250, 0.16);
+  border-color: rgba(167, 139, 250, 0.45);
+  color: #bfdbfe;
+}
+
+.ov-btn-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 16px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 0 20px rgba(179, 136, 255, 0.25);
+}
+
+/* ==========================================================================
+   2. Onboarding Studio Banner Strip
+   ========================================================================== */
+.ov-onboard-strip {
+  position: relative;
+  overflow: hidden;
+  border-radius: 16px;
+  padding: 18px 20px;
+  background: linear-gradient(135deg, rgba(20, 26, 36, 0.95), rgba(14, 18, 24, 0.98));
+  border: 1px solid rgba(179, 136, 255, 0.22);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ov-onboard-strip-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.ov-onboard-strip-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 2px;
+}
+
+.ov-onboard-strip-title-row h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.ov-onboard-pill {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(179, 136, 255, 0.14);
+  border: 1px solid rgba(179, 136, 255, 0.3);
+  color: #b388ff;
+}
+
+.ov-onboard-progress-ring-wrap {
+  width: 140px;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.ov-onboard-strip-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #b388ff, #818cf8);
+  transition: width 0.3s ease;
+}
+
+.ov-onboard-steps-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.ov-onboard-step-card {
+  display: block;
+  text-decoration: none;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.025);
+  border-radius: 12px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.ov-onboard-step-card:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(179, 136, 255, 0.3);
+  transform: translateY(-1px);
+}
+
+.ov-onboard-step-card.is-done {
+  background: rgba(255, 255, 255, 0.012);
+  border-color: rgba(255, 255, 255, 0.04);
+  opacity: 0.75;
+  cursor: default;
+}
+
+.ov-onboard-step-card-inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ov-onboard-step-badge {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+  font-family: var(--mono, monospace);
+  flex-shrink: 0;
+}
+
+.ov-onboard-step-badge.is-done {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.35);
+  color: #34d399;
+}
+
+.ov-onboard-step-text-col {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.ov-onboard-step-name {
+  font-size: 12.5px;
+  font-weight: 650;
+  color: #f1f5f9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ov-onboard-step-status {
+  font-size: 11px;
+  color: #64748b;
+}
+
+/* ==========================================================================
+   3. Studio Deck (Asymmetrical 2-Column Command Workspace)
+   ========================================================================== */
+.ov-studio-deck {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.4fr);
+  gap: 16px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  align-items: start;
+}
+
+.ov-deck-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* Common Card Base */
+.ov-card {
+  position: relative;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  background: #13171e;
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.ov-card:hover {
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.ov-micro-tag {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+}
+
+.ov-tag-accent {
+  color: #b388ff;
+}
+
+/* --------------------------------------------------------------------------
+   LEFT: Cockpit Card (Unified Balance & Quota HUD)
+   -------------------------------------------------------------------------- */
+.ov-cockpit-card {
+  background: linear-gradient(155deg, #151a24 0%, #101319 100%);
+  border-color: rgba(179, 136, 255, 0.24);
+  padding: 22px;
+}
+
+.ov-cockpit-glow {
+  position: absolute;
+  top: -80px;
+  right: -80px;
+  width: 240px;
+  height: 240px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(179, 136, 255, 0.22), transparent 70%);
+  pointer-events: none;
+}
+
+.ov-cockpit-top {
+  position: relative;
+  z-index: 1;
+}
+
+.ov-cockpit-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.ov-tag-live {
+  font-size: 10px;
+  font-weight: 700;
+  color: #b388ff;
+  background: rgba(179, 136, 255, 0.12);
+  border: 1px solid rgba(179, 136, 255, 0.25);
+  padding: 2px 6px;
+  border-radius: 5px;
+  text-transform: uppercase;
+}
+
+.ov-cockpit-figure-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ov-cockpit-balance-val {
+  font-size: clamp(34px, 3.4vw, 46px);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  color: #ffffff;
+  text-shadow: 0 0 32px rgba(179, 136, 255, 0.22);
+}
+
+.ov-btn-topup-accent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 18px;
+  font-size: 13.5px;
+  font-weight: 700;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.ov-cockpit-sub {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.ov-cockpit-divider {
+  height: 1px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+  margin: 18px 0;
+}
+
+.ov-cockpit-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ov-cockpit-free-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ov-cockpit-free-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ov-cockpit-link {
+  font-size: 12px;
+  font-weight: 600;
+  color: #b388ff;
+  text-decoration: none;
+}
+
+.ov-cockpit-link:hover {
+  text-decoration: underline;
+}
+
+.ov-cockpit-meter {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.22);
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.ov-cockpit-meter-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.ov-meter-label {
+  display: block;
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 2px;
+}
+
+.ov-meter-strong {
+  font-size: 20px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: #f1f5f9;
+}
+
+.ov-meter-secondary {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-cockpit-bar {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.ov-cockpit-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #b388ff, #a78bfa);
+  transition: width 0.3s ease;
+}
+
+.ov-cockpit-fill.is-warn {
+  background: #f59e0b;
+}
+
+.ov-cockpit-fill.is-danger {
+  background: #ef4444;
+}
+
+.ov-cockpit-reset-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.ov-cockpit-unlimited {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(16, 185, 129, 0.06);
+  border: 1px solid rgba(16, 185, 129, 0.18);
+}
+
+.ov-cockpit-unlimited-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #34d399;
+}
+
+.ov-cockpit-unlimited-meta {
+  font-size: 12px;
+  color: #64748b;
+}
+
+/* --------------------------------------------------------------------------
+   LEFT: Quick Integration Terminal Card
+   -------------------------------------------------------------------------- */
+.ov-terminal-card {
+  padding: 20px;
+  background: #12151b;
+}
+
+.ov-terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.ov-terminal-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ov-terminal-badge-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(179, 136, 255, 0.1);
+  border: 1px solid rgba(179, 136, 255, 0.22);
+  color: #b388ff;
+  flex-shrink: 0;
+}
+
+.ov-terminal-heading {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #f1f5f9;
+  letter-spacing: -0.01em;
+}
+
+.ov-terminal-sub {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.ov-terminal-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ov-terminal-copy-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+
+.ov-terminal-tabs {
+  display: flex;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 3px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 12px;
+}
+
+.ov-terminal-tab {
+  flex: 1;
+  height: 28px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+              color 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  text-align: center;
+}
+
+.ov-terminal-tab:focus {
+  outline: none;
+}
+
+@media (hover: hover) {
+  .ov-terminal-tab:not(.is-active):hover {
+    color: #f1f5f9;
+    background: rgba(255, 255, 255, 0.04);
+  }
+}
+
+.ov-terminal-tab:not(.is-active) {
+  background: transparent !important;
+  color: #94a3b8 !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.ov-terminal-tab.is-active {
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: #b388ff !important;
+  border-color: rgba(179, 136, 255, 0.25) !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3) !important;
+}
+
+.ov-codebox-pre {
+  margin: 0;
+  padding: 14px 16px;
+  background: transparent;
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+  line-height: 1.6;
+  color: #cbd5e1;
+  overflow-x: auto;
+  animation: codebox-fade 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes codebox-fade {
+  from {
+    opacity: 0.3;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   RIGHT: Telemetry Card (7-Day Throughput Curve + Stat Pills)
+   -------------------------------------------------------------------------- */
+.ov-telemetry-card {
+  padding: 22px;
+  background: #12161c;
+}
+
+.ov-telemetry-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.ov-telemetry-title-block h3 {
+  margin: 3px 0 0;
+  font-size: 16px;
+  font-weight: 750;
+  color: #f1f5f9;
+  letter-spacing: -0.02em;
+}
+
+.ov-telemetry-link-btn {
+  font-size: 12px;
+  font-weight: 600;
+  color: #b388ff;
+  text-decoration: none;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: rgba(179, 136, 255, 0.06);
+  border: 1px solid rgba(179, 136, 255, 0.18);
+  transition: all 0.15s ease;
+}
+
+.ov-telemetry-link-btn:hover {
+  background: rgba(179, 136, 255, 0.14);
+  color: #c9a8ff;
+}
+
+.ov-telemetry-stat-pills {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.ov-telemetry-stat-pill {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.ov-telemetry-stat-pill small {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.ov-telemetry-stat-pill strong {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f1f5f9;
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-telemetry-chart-wrap {
+  min-height: 200px;
+}
+
+/* --------------------------------------------------------------------------
+   RIGHT: Clean Recent Requests Card
+   -------------------------------------------------------------------------- */
+.ov-recent-card {
+  padding: 20px;
+  background: #11141a;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.ov-recent-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.ov-recent-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ov-recent-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: rgba(179, 136, 255, 0.1);
+  border: 1px solid rgba(179, 136, 255, 0.22);
+  color: #b388ff;
+  flex-shrink: 0;
+}
+
+.ov-recent-title-group h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.ov-recent-title-group p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.ov-recent-count {
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.ov-recent-body {
+  flex: 1;
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+}
+
+.ov-recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.ov-recent-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.035);
+  transition: all 0.15s ease;
+}
+
+.ov-recent-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.ov-recent-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ov-recent-lead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ov-recent-model {
+  font-size: 13px;
+  font-weight: 650;
+  color: #f1f5f9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ov-recent-detail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+  padding-left: 14px;
+}
+
+.ov-meta-dot {
+  opacity: 0.4;
+}
+
+.ov-recent-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.ov-recent-cost {
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+  font-weight: 750;
+  color: #b388ff;
+}
+
+.ov-recent-time {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.ov-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ov-status-dot.is-ok {
+  background: #10b981;
+  box-shadow: 0 0 6px #10b981;
+}
+
+.ov-status-dot.is-err {
+  background: #ef4444;
+  box-shadow: 0 0 6px #ef4444;
+}
+
+.ov-recent-empty {
+  margin: auto;
+  padding: 28px 16px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.ov-recent-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.ov-recent-empty strong {
+  font-size: 14px;
+  font-weight: 650;
+  color: #e2e8f0;
+}
+
+.ov-recent-empty p {
+  margin: 0;
+  font-size: 12px;
+  color: #64748b;
+  max-width: 280px;
+  line-height: 1.45;
+}
+
+/* ==========================================================================
+   Mobile-First & Responsive Excellence (iPhone & Android Perfection)
+   ========================================================================== */
+@media (max-width: 1040px) {
+  .ov-studio-deck {
+    grid-template-columns: 1fr;
+  }
+
+  .ov-onboard-steps-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 680px) {
+  .dashboard-v2 {
+    gap: 12px;
+    padding-bottom: 24px;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .ov-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 0;
+    margin: 0;
+  }
+
+  .ov-header-main {
+    flex: 1 1 auto;
+    width: 100%;
+  }
+
+  .ov-title-wrap {
+    gap: 3px;
+  }
+
+  .ov-badge-status {
+    font-size: 10px;
+    padding: 2px 7px;
+  }
+
+  .ov-title {
+    font-size: 21px;
+    line-height: 1.2;
+  }
+
+  .ov-subtitle {
+    display: none; /* Hide bulky 4-line description to remove huge top gap on mobile */
+  }
+
+  .ov-header-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    width: 100%;
+    margin-top: 2px;
+  }
+
+  .ov-btn-pill {
+    width: 100%;
+    justify-content: center;
+    padding: 0 6px;
+    height: 38px;
+    font-size: 11.5px;
+    box-sizing: border-box;
+  }
+
+  .ov-btn-key {
+    grid-column: span 2;
+    width: 100%;
+    justify-content: center;
+    height: 40px;
+    font-size: 13px;
+    box-sizing: border-box;
+  }
+
+  .ov-studio-deck {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    width: 100%;
+  }
+
+  .ov-deck-col {
+    gap: 12px;
+    width: 100%;
+  }
+
+  /* Onboarding on Mobile */
+  .ov-onboard-strip {
+    padding: 12px 14px;
+    gap: 10px;
+  }
+
+  .ov-onboard-steps-grid {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  /* Cockpit Card on Mobile */
+  .ov-cockpit-card {
+    padding: 14px;
+  }
+
+  .ov-cockpit-figure-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .ov-cockpit-balance-val {
+    font-size: 28px;
+  }
+
+  .ov-btn-topup-accent {
+    width: 100%;
+    justify-content: center;
+    height: 38px;
+  }
+
+  .ov-cockpit-free-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  /* Telemetry Stat Pills on Mobile */
+  .ov-telemetry-stat-pills {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .ov-telemetry-card,
+  .ov-recent-card,
+  .ov-terminal-card {
+    padding: 14px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .ov-terminal-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .ov-terminal-tab {
+    padding: 0 4px;
+    font-size: 11px;
+  }
+
+  .ov-codebox-pre {
+    padding: 10px 12px;
+    font-size: 11px;
+    max-width: 100%;
+  }
+
+  /* Recent Requests rows on Mobile */
+  .ov-recent-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 9px 10px;
+  }
+
+  .ov-recent-main {
+    width: 100%;
+  }
+
+  .ov-recent-meta {
+    width: 100%;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 5px;
+    border-top: 1px dashed rgba(255, 255, 255, 0.06);
+  }
+}
