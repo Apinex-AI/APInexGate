@@ -34,9 +34,30 @@ function formatSeconds(ms: number) {
   return `${(Math.max(0, ms) / 1000).toFixed(1)}s`
 }
 
+function isDecisionCatalogModel(model: Pick<CustomerModel, 'id' | 'provider'>) {
+  const prov = model.provider.trim().toLowerCase()
+  const id = model.id.trim().toLowerCase()
+  return (
+    prov === 'jev group' ||
+    prov === 'jev' ||
+    prov === 'decisions' ||
+    id.includes('jev-') ||
+    id.includes('drex') ||
+    id.includes('subq') ||
+    id.includes('decision')
+  )
+}
+
 function splitPrices(model: CustomerModel) {
   const input = Number(model.inputDollarsPer1M ?? model.dollarsPer1M) || 0
-  const output = Number(model.outputDollarsPer1M ?? model.dollarsPer1M) || input
+  const isJev = isDecisionCatalogModel(model)
+  const rawOut = model.outputDollarsPer1M
+  const output =
+    rawOut != null && Number.isFinite(Number(rawOut)) && (Number(rawOut) > 0 || isJev)
+      ? Number(rawOut)
+      : isJev
+        ? 0
+        : input
   return { input: Math.max(0, input), output: Math.max(0, output) }
 }
 
@@ -363,6 +384,31 @@ export function Playground() {
       })
     }
     try {
+      const selectedItem = chatModels.find((item) => item.id === chatModel)
+      const isDecision = selectedItem ? isDecisionCatalogModel(selectedItem) : /jev-|drex|subq|decision/i.test(chatModel)
+      if (isDecision) {
+        const response = await fetch('/v1/decisions/playground', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ model: chatModel, messages: [{ role: 'user', content }] }),
+          signal: controller.signal,
+        })
+        if (!response.ok) {
+          finish({ streaming: false, error: await readError(response), seconds: performance.now() - started })
+          return
+        }
+        const json = (await response.json()) as { answers?: unknown; usageMeta?: PlaygroundMeta }
+        const formatted = `\`\`\`json\n${JSON.stringify(json.answers ?? json, null, 2)}\n\`\`\``
+        finish({
+          streaming: false,
+          text: formatted,
+          meta: json.usageMeta ?? null,
+          seconds: json.usageMeta?.latencyMs ?? performance.now() - started,
+        })
+        return
+      }
+
       const response = await fetch('/v1/chat/completions/playground', {
         method: 'POST',
         credentials: 'include',
@@ -611,7 +657,7 @@ export function Playground() {
               <button type="button" className="playground-model-btn" onClick={() => setModelOpen((open) => !open)}>
                 {selected && (
                   <span className="playground-model-btn-icon" aria-hidden>
-                    <ProviderIcon provider={selected.provider} size={15} />
+                    <ProviderIcon provider={selected.provider} modelId={selected.id} size={15} />
                   </span>
                 )}
                 <span className="playground-model-name">{selected?.name || 'Model'}</span>
@@ -636,7 +682,7 @@ export function Playground() {
                       >
                         <div className="menu-item-lead">
                           <span className="menu-item-icon" aria-hidden>
-                            <ProviderIcon provider={item.provider} size={16} />
+                            <ProviderIcon provider={item.provider} modelId={item.id} size={16} />
                           </span>
                           <div className="menu-item-info">
                             <span className="menu-item-name">{item.name}</span>

@@ -150,7 +150,7 @@ function GatewayControlDeck({ models }: { models: PublicModel[] }) {
               >
                 {selected ? (
                   <span className="lp-model-btn-lead">
-                    <ProviderIcon provider={selected.provider} size={18} />
+                    <ProviderIcon provider={selected.provider} modelId={selected.id} size={18} />
                     <span className="lp-model-btn-name">{selected.name}</span>
                   </span>
                 ) : (
@@ -199,7 +199,7 @@ function GatewayControlDeck({ models }: { models: PublicModel[] }) {
                         >
                           <div className="lp-model-item-lead">
                             <span className="lp-model-icon">
-                              <ProviderIcon provider={m.provider} size={18} />
+                              <ProviderIcon provider={m.provider} modelId={m.id} size={18} />
                             </span>
                             <div className="lp-model-item-text">
                               <span className="lp-model-title">{m.name}</span>
@@ -419,8 +419,7 @@ export function Landing() {
           </h1>
 
           <p className="lp-hero-desc">
-            Access Claude, DeepSeek, GPT-4o, and specialized models at official rates.
-            Pay with crypto or balance and connect through a single universal API key.
+            Access Claude, DeepSeek, GPT, and more models 10X cheaper than official rates. Connect through a single universal API key.
           </p>
 
           <div className="lp-metric-pill">

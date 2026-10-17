@@ -183,7 +183,7 @@ export function Models() {
                   <td className="td-name">
                     <div className="model-name-cell">
                       <div className="model-cell-icon" aria-hidden>
-                        <ProviderIcon provider={model.provider} size={18} />
+                        <ProviderIcon provider={model.provider} modelId={model.id} size={18} />
                       </div>
                       <div className="model-name-info">
                         <strong className="model-cell-title">{model.name}</strong>
@@ -330,14 +330,22 @@ export function UptimeBadge({ uptime }: { uptime: number }) {
   )
 }
 
-function modelPrice(model: { dollarsPer1M: number; inputDollarsPer1M?: number; outputDollarsPer1M?: number }) {
+function modelPrice(model: { id?: string; provider?: string; dollarsPer1M: number; inputDollarsPer1M?: number; outputDollarsPer1M?: number }) {
   const input = Number(model.inputDollarsPer1M ?? model.dollarsPer1M) || 0
-  const output = Number(model.outputDollarsPer1M ?? model.dollarsPer1M) || input
+  const isJev = model.provider === 'Jev Group' || /jev-|drex|subq|decision/i.test(model.id ?? '')
+  const rawOut = model.outputDollarsPer1M
+  const output = rawOut != null && Number.isFinite(Number(rawOut)) && (Number(rawOut) > 0 || isJev)
+    ? Number(rawOut)
+    : isJev
+      ? 0
+      : input
   return { input: Math.max(0, input), output: Math.max(0, output) }
 }
 
 function formatPrice(value: number) {
   if (!Number.isFinite(value)) return '0.00'
+  const milli = Math.round(value * 1000)
+  if (milli % 10 !== 0) return value.toFixed(3)
   return value.toFixed(2)
 }
 

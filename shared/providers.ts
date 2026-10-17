@@ -10,12 +10,24 @@ export const PROVIDER_ORDER = [
   'Grok',
   'Tencent',
   'Muse',
+  'Jev Group',
 ] as const
 
 export function normalizeProviderName(provider: string) {
   const raw = provider.trim()
   const slug = raw.toLowerCase()
   if (slug === 'free') return 'Free'
+  if (
+    slug === 'jev' ||
+    slug === 'jev group' ||
+    slug === 'jev-group' ||
+    slug === 'decisions' ||
+    slug === 'decision' ||
+    slug === 'typesafe' ||
+    slug === 'subq'
+  ) {
+    return 'Jev Group'
+  }
   if (slug === 'grok' || slug === 'xai' || slug.startsWith('xai') || slug.startsWith('grok')) return 'Grok'
   if (slug === 'google' || slug.startsWith('google')) return 'Gemini'
   if (slug === 'openai' || slug === 'gpt' || slug.startsWith('openai')) return 'GPT'

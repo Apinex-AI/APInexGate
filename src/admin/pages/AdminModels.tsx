@@ -41,8 +41,12 @@ function priceDraft(dollars: number) {
 function formatSplitPrice(model: AdminModel) {
   const input = Math.max(0, Number(model.input_price_micros) || 0) / 1_000_000
   const outputRaw = Math.max(0, Number(model.output_price_micros) || 0) / 1_000_000
-  const output = outputRaw > 0 ? outputRaw : input
-  const label = (value: number) => `$${value.toFixed(2)}`
+  const isJev = model.provider === 'Jev Group' || /jev|drex|subq|decision/i.test(model.id)
+  const output = outputRaw > 0 ? outputRaw : isJev ? 0 : input
+  const label = (value: number) => {
+    const milli = Math.round(value * 1000)
+    return `$${milli % 10 !== 0 ? value.toFixed(3) : value.toFixed(2)}`
+  }
   return `${label(input)} / ${label(output)}`
 }
 
@@ -193,7 +197,12 @@ export function AdminModels() {
           }
         : {
             inputPrice: selected?.inputPrice && selected.inputPrice > 0 ? selected.inputPrice : 0.1,
-            outputPrice: selected?.outputPrice && selected.outputPrice > 0 ? selected.outputPrice : 0.1,
+            outputPrice:
+              selected?.outputPrice !== undefined && selected.outputPrice >= 0
+                ? selected.outputPrice
+                : category === 'Jev Group'
+                  ? 0
+                  : 0.1,
             tokenWeight: 0,
           }),
       ...(editTarget ? { upstreamRoutes: editRoutes.filter((route) => route.upstreamId) } : {}),
@@ -351,7 +360,7 @@ export function AdminModels() {
                       <td>
                         <div className="table-person">
                           <span className={`provider-logo provider-${slug}`}>
-                            <ProviderIcon provider={model.provider} size={22} />
+                            <ProviderIcon provider={model.provider} modelId={model.id} size={22} />
                           </span>
                           <div>
                             <strong>{model.name}</strong>
@@ -367,7 +376,7 @@ export function AdminModels() {
                       </td>
                       <td>
                         <span className={`provider-label provider-${slug}`}>
-                          <ProviderIcon provider={model.provider} size={14} />
+                          <ProviderIcon provider={model.provider} modelId={model.id} size={14} />
                           {model.provider}
                         </span>
                       </td>
@@ -389,8 +398,9 @@ export function AdminModels() {
                               setPriceTarget(model)
                               const input = Math.max(0, Number(model.input_price_micros) || 0) / 1_000_000
                               const outputRaw = Math.max(0, Number(model.output_price_micros) || 0) / 1_000_000
+                              const isJev = model.provider === 'Jev Group' || /jev|drex|subq|decision/i.test(model.id)
                               setPriceInput(priceDraft(input))
-                              setPriceOutput(priceDraft(outputRaw > 0 ? outputRaw : input))
+                              setPriceOutput(priceDraft(outputRaw > 0 ? outputRaw : isJev ? 0 : input))
                             }}
                           >
                             <IconPencil size={14} />
@@ -642,7 +652,8 @@ export function AdminModels() {
                 if (!priceTarget) return
                 const input = Number(priceInput)
                 const output = Number(priceOutput)
-                if (!Number.isFinite(input) || input < 0.01 || !Number.isFinite(output) || output < 0.01) return
+                const isJev = priceTarget.provider === 'Jev Group' || /jev|drex|subq|decision/i.test(priceTarget.id)
+                if (!Number.isFinite(input) || input < 0.01 || !Number.isFinite(output) || output < (isJev ? 0 : 0.01)) return
                 void run(async () => {
                   await adminApi.updatePricing(priceTarget.id, {
                     inputDollarsPer1M: input,

@@ -557,6 +557,8 @@ function estimateUsage(body: Record<string, unknown>, data?: Record<string, unkn
   const inputChars =
     textCharCount(body.messages) +
     textCharCount(body.input) +
+    textCharCount(body.state) +
+    (body.questions ? JSON.stringify(body.questions).length : 0) +
     textCharCount(body.prompt) +
     textCharCount(body.system)
   const outputChars = data ? textCharCount(data) : 0
@@ -729,7 +731,7 @@ export function buildUpstreamRequestHeaders(
 
 async function upstreamPost(
   baseUrl: string,
-  path: 'chat/completions' | 'responses',
+  path: 'chat/completions' | 'responses' | 'decisions',
   providerSecret: string,
   payload: Record<string, unknown>,
   dispatcher?: Dispatcher,
@@ -1763,6 +1765,14 @@ async function proxyModelRequest(input: {
   })
   if (limited) return limited
   const upstreamModelId = (model.upstream_id?.trim() || model.id).trim()
+  if (
+    isDecisionModelId(upstreamModelId) ||
+    isDecisionModelId(publicModelId) ||
+    model.provider.trim().toLowerCase() === 'jev group'
+  ) {
+    const msg = `Model '${publicModelId}' is a Jev Group Decision model and cannot be called on /v1/${path}. Please use POST /v1/decisions instead (docs: /docs/models/decisions).`
+    return sendError(400, msg, 'invalid_request_error')
+  }
   const outputLimitError = validateModelOutputLimits(body, [publicModelId, upstreamModelId])
   if (outputLimitError) return sendError(400, outputLimitError, 'invalid_request_error')
   const inputLimitError = validateModelInputLimits(body, [publicModelId, upstreamModelId])
@@ -2293,7 +2303,7 @@ function roundUsdFromTokens(tokens: number) {
   return Math.round(usd * 1e8) / 1e8
 }
 
-/** Wallet, in-flight holds, key cap, and free-model subscription allowance for the calling key. */
+/** Prepaid USD wallet, in-flight holds, and calling API key spend limits. */
 function balancePayload(auth: AuthOk) {
   const walletReserved = getOpenReservedTokensForUser(auth.user.id)
   const keyReserved = getOpenReservedTokensForKey(auth.key.id)
@@ -2301,7 +2311,6 @@ function balancePayload(auth: AuthOk) {
   const spent = Math.max(0, auth.key.spent_tokens)
   const remainingTokens =
     spendLimit === null ? null : Math.max(0, spendLimit - spent - keyReserved)
-  const access = getFreeTierAccess(auth.user.id)
 
   return {
     object: 'balance',
@@ -2315,17 +2324,49 @@ function balancePayload(auth: AuthOk) {
       remaining_usd: remainingTokens === null ? null : roundUsdFromTokens(remainingTokens),
       limit_reached: spendLimit !== null && spent + keyReserved >= spendLimit,
     },
-    subscription: {
-      active: access.mode === 'subscription',
-      label: access.planLabel,
-      unlimited: access.unlimited,
-      limit: access.limit,
-      used: access.used,
-      remaining: access.remaining,
-      expires_at: access.expiresAt,
-      resets_at: access.resetsAt,
-      allowed: access.allowed,
-    },
+  }
+}
+
+/** Active subscription or daily free-model token allowance for the calling account. */
+function subscriptionPayload(auth: AuthOk) {
+  const access = getFreeTierAccess(auth.user.id)
+  const plan = access.planKey
+  const normalizedPlan =
+    plan === 'day1'
+      ? '3_days'
+      : plan === 'day7'
+        ? '10_days'
+        : plan === 'day14'
+          ? '20_days'
+          : plan === 'day30'
+            ? '30_days'
+            : plan
+  return {
+    object: 'subscription',
+    mode: access.mode,
+    active: access.mode === 'subscription',
+    plan: normalizedPlan,
+    plan_label: access.planLabel,
+    unlimited: access.unlimited,
+    token_limit: access.limit,
+    tokens_used: access.used,
+    tokens_remaining: access.remaining,
+    expires_at_utc: access.expiresAt ? new Date(access.expiresAt).toISOString() : null,
+    resets_at_utc: access.resetsAt ? new Date(access.resetsAt).toISOString() : null,
+    allowed: access.allowed,
+  }
+}
+
+/** Active requests-per-minute (RPM) rate limit and plan for the calling account. */
+function rpmPayload(auth: AuthOk) {
+  const rpmInfo = getAccountRpm(auth.user.id)
+  return {
+    object: 'rpm',
+    rpm: rpmInfo.rpm,
+    plan: rpmInfo.planKey,
+    label: rpmInfo.label,
+    source: rpmInfo.source,
+    expires_at_utc: rpmInfo.expiresAt ? new Date(rpmInfo.expiresAt).toISOString() : null,
   }
 }
 
@@ -2334,6 +2375,18 @@ export async function registerGatewayRoutes(app: FastifyInstance) {
     const auth = authenticateApiKey(request)
     if (isAuthFailure(auth)) return sendOpenAiError(reply, auth.status, auth.error, 'authentication_error')
     return balancePayload(auth)
+  })
+
+  app.get('/v1/subscription', async (request, reply) => {
+    const auth = authenticateApiKey(request)
+    if (isAuthFailure(auth)) return sendOpenAiError(reply, auth.status, auth.error, 'authentication_error')
+    return subscriptionPayload(auth)
+  })
+
+  app.get('/v1/rpm', async (request, reply) => {
+    const auth = authenticateApiKey(request)
+    if (isAuthFailure(auth)) return sendOpenAiError(reply, auth.status, auth.error, 'authentication_error')
+    return rpmPayload(auth)
   })
 
   app.get('/v1/models', async (request, reply) => {
@@ -2387,6 +2440,589 @@ export async function registerGatewayRoutes(app: FastifyInstance) {
   app.post('/v1/responses', async (request, reply) =>
     proxyModelRequest({ request, reply, path: 'responses', errorStyle: 'openai' }),
   )
+
+  // Jev Group Decisions API (TypeSafe / SubQ / OpenAI Decisions shapes)
+  app.post('/v1/decisions', async (request, reply) =>
+    proxyDecisionRequest({ request, reply }),
+  )
+
+  app.post('/v1/decisions/playground', async (request, reply) =>
+    proxyDecisionRequest({ request, reply, playground: true }),
+  )
+}
+
+export function isDecisionModelId(modelId: string | null | undefined): boolean {
+  const id = String(modelId ?? '').trim().toLowerCase()
+  return (
+    id.includes('subq-snap') ||
+    id.startsWith('subq/') ||
+    id.includes('jev-1.') ||
+    id.startsWith('jev-') ||
+    id.startsWith('free/jev') ||
+    id.includes('drex-') ||
+    id.startsWith('free/drex') ||
+    id.startsWith('free/subq') ||
+    id.startsWith('nace/') ||
+    id.startsWith('typesafe/') ||
+    id.includes('luna-decision') ||
+    id.startsWith('decision/') ||
+    id.startsWith('decisions/')
+  )
+}
+
+const BUILTIN_DECISION_MODELS: Record<
+  string,
+  { upstreamId: string; name: string; provider: string; inputPriceMicros: number; outputPriceMicros: number }
+> = {
+  'subq/subq-snap-preview': {
+    upstreamId: 'subq-snap-preview',
+    name: 'SubQ Snap (Preview)',
+    provider: 'Jev Group',
+    inputPriceMicros: 50_000,
+    outputPriceMicros: 0,
+  },
+  'subq-snap-preview': {
+    upstreamId: 'subq-snap-preview',
+    name: 'SubQ Snap (Preview)',
+    provider: 'Jev Group',
+    inputPriceMicros: 50_000,
+    outputPriceMicros: 0,
+  },
+  'typesafe/jev-1.13': {
+    upstreamId: 'jev-1.13',
+    name: 'Jev 1.13',
+    provider: 'Jev Group',
+    inputPriceMicros: 42_000,
+    outputPriceMicros: 0,
+  },
+  'jev-1.13': {
+    upstreamId: 'jev-1.13',
+    name: 'Jev 1.13',
+    provider: 'Jev Group',
+    inputPriceMicros: 42_000,
+    outputPriceMicros: 0,
+  },
+  'free/jev-1.13': {
+    upstreamId: 'free/jev-1.13',
+    name: 'Jev 1.13',
+    provider: 'Free',
+    inputPriceMicros: 0,
+    outputPriceMicros: 0,
+  },
+  'drex-v2.0': {
+    upstreamId: 'drex-v2.0',
+    name: 'Drex 2.0',
+    provider: 'Jev Group',
+    inputPriceMicros: 40_000,
+    outputPriceMicros: 0,
+  },
+  'drex-latest': {
+    upstreamId: 'drex-v2.0',
+    name: 'Drex 2.0',
+    provider: 'Jev Group',
+    inputPriceMicros: 40_000,
+    outputPriceMicros: 0,
+  },
+  'drex-v1.5': {
+    upstreamId: 'drex-v1.5',
+    name: 'Drex 1.5',
+    provider: 'Jev Group',
+    inputPriceMicros: 40_000,
+    outputPriceMicros: 0,
+  },
+  'drex-v1.0': {
+    upstreamId: 'drex-v1.0',
+    name: 'Drex 1.0',
+    provider: 'Jev Group',
+    inputPriceMicros: 40_000,
+    outputPriceMicros: 0,
+  },
+  'gpt-6-luna-decisions': {
+    upstreamId: 'gpt-6-luna-decisions',
+    name: 'GPT-6 Luna (Decisions)',
+    provider: 'Jev Group',
+    inputPriceMicros: 100_000,
+    outputPriceMicros: 0,
+  },
+}
+
+function resolveDecisionModel(publicId: string): ModelRow | undefined {
+  const catalogModel = resolveModel(publicId)
+  if (catalogModel && catalogModel.status === 'active') {
+    return catalogModel
+  }
+
+  const normalized = publicId.trim().toLowerCase()
+  const builtin = BUILTIN_DECISION_MODELS[normalized]
+  if (!builtin) return undefined
+
+  return {
+    id: publicId.trim(),
+    upstream_id: builtin.upstreamId,
+    provider: builtin.provider,
+    name: builtin.name,
+    token_weight: 1,
+    input_price_micros: builtin.inputPriceMicros,
+    output_price_micros: builtin.outputPriceMicros,
+    upstream_provider: 'apinex',
+    status: 'active',
+  }
+}
+
+function normalizeOpenAiDecisionQuestions(questions: unknown[]): unknown[] {
+  return questions.map((q) => {
+    if (!q || typeof q !== 'object') return q
+    const row = { ...(q as Record<string, unknown>) }
+    if (row.type === 'score' && Array.isArray(row.levels)) {
+      row.levels = row.levels.map((lvl) => {
+        if (!lvl || typeof lvl !== 'object') return lvl
+        const lRow = { ...(lvl as Record<string, unknown>) }
+        if (!('label' in lRow) && 'value' in lRow) {
+          lRow.label = String(lRow.value)
+          delete lRow.value
+        }
+        return lRow
+      })
+    }
+    return row
+  })
+}
+
+function normalizeTypeSafeDecisionQuestions(
+  rawObj: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [key, rawVal] of Object.entries(rawObj)) {
+    if (!rawVal || typeof rawVal !== 'object' || Array.isArray(rawVal)) continue
+    const q = rawVal as Record<string, unknown>
+    const rawType = String(q.type ?? 'noul').toLowerCase()
+    const instructions = String(q.instructions ?? q.question ?? `Evaluate ${key}`)
+    if (rawType === 'noul' || rawType === 'predicate' || rawType === 'binary') {
+      out[key] = { type: 'noul', instructions }
+    } else if (rawType === 'choice') {
+      const criteria: Record<string, string> = {}
+      const rawCriteria = q.criteria ?? q.options ?? q.choices
+      if (Array.isArray(rawCriteria)) {
+        for (const item of rawCriteria) {
+          if (typeof item === 'string' && item.trim()) {
+            criteria[item.trim()] = item.trim()
+          } else if (item && typeof item === 'object') {
+            const row = item as Record<string, unknown>
+            const val = String(row.value ?? row.name ?? row.label ?? '').trim()
+            if (val) criteria[val] = String(row.description ?? row.label ?? val)
+          }
+        }
+      } else if (rawCriteria && typeof rawCriteria === 'object') {
+        for (const [k, v] of Object.entries(rawCriteria as Record<string, unknown>)) {
+          if (k.trim()) criteria[k.trim()] = String(v ?? k)
+        }
+      }
+      out[key] = { type: 'choice', instructions, criteria }
+    } else if (rawType === 'score') {
+      const rawScale = q.criteria ?? q.scale ?? q.levels ?? q.options
+      const criteria: string[] = []
+      if (Array.isArray(rawScale)) {
+        for (const item of rawScale) {
+          if (typeof item === 'string' && item.trim()) {
+            criteria.push(item.trim())
+          } else if (item && typeof item === 'object') {
+            const row = item as Record<string, unknown>
+            const label = String(row.label ?? row.name ?? row.value ?? '').trim()
+            if (label) criteria.push(label)
+          }
+        }
+      } else if (rawScale && typeof rawScale === 'object') {
+        for (const k of Object.keys(rawScale as Record<string, unknown>)) {
+          if (k.trim()) criteria.push(k.trim())
+        }
+      }
+      out[key] = {
+        type: 'score',
+        instructions,
+        criteria: criteria.length >= 2 ? criteria : ['low', 'medium', 'high'],
+      }
+    } else {
+      out[key] = q
+    }
+  }
+  return out
+}
+
+export function buildDecisionPayload(
+  body: Record<string, unknown>,
+  upstreamModelId: string,
+): Record<string, unknown> {
+  // 1. Native OpenAI Decisions API shape: { model, input, questions: [...] }
+  if ('input' in body && Array.isArray(body.questions)) {
+    const payload: Record<string, unknown> = {
+      model: upstreamModelId,
+      input: body.input,
+      questions: normalizeOpenAiDecisionQuestions(body.questions),
+    }
+    if (typeof body.safety_identifier === 'string' && body.safety_identifier.trim()) {
+      payload.safety_identifier = body.safety_identifier.trim()
+    }
+    return payload
+  }
+
+  // 2. Native TypeSafe / SubQ shape: { model, state, questions: {...}, images? }
+  if ('state' in body && body.questions && typeof body.questions === 'object' && !Array.isArray(body.questions)) {
+    const payload: Record<string, unknown> = {
+      model: upstreamModelId,
+      state: body.state,
+      questions: normalizeTypeSafeDecisionQuestions(body.questions as Record<string, unknown>),
+    }
+    if (Array.isArray(body.images) && body.images.length > 0) {
+      payload.images = body.images.slice(0, 4)
+    }
+    return payload
+  }
+
+  // 3. Mixed: caller sent `state` with array `questions` -> convert to OpenAI shape
+  if ('state' in body && Array.isArray(body.questions)) {
+    return {
+      model: upstreamModelId,
+      input: typeof body.state === 'string' ? body.state : JSON.stringify(body.state),
+      questions: normalizeOpenAiDecisionQuestions(body.questions),
+    }
+  }
+
+  // 4. Mixed: caller sent `input` with object `questions` -> convert to TypeSafe shape
+  if ('input' in body && body.questions && typeof body.questions === 'object' && !Array.isArray(body.questions)) {
+    return {
+      model: upstreamModelId,
+      state: body.input,
+      questions: normalizeTypeSafeDecisionQuestions(body.questions as Record<string, unknown>),
+    }
+  }
+
+  // 5. Chat messages fallback (e.g. Playground)
+  if (Array.isArray(body.messages)) {
+    const textParts: string[] = []
+    const images: Array<{ mediaType: 'image/png' | 'image/jpeg' | 'image/webp'; base64: string }> = []
+    for (const raw of body.messages) {
+      if (!raw || typeof raw !== 'object') continue
+      const msg = raw as Record<string, unknown>
+      if (String(msg.role ?? 'user').trim() === 'system') continue
+      const content = msg.content
+      if (typeof content === 'string' && content.trim()) {
+        textParts.push(content.trim())
+      } else if (Array.isArray(content)) {
+        for (const part of content) {
+          if (typeof part === 'string' && part.trim()) {
+            textParts.push(part.trim())
+          } else if (part && typeof part === 'object') {
+            const p = part as Record<string, unknown>
+            if (typeof p.text === 'string' && p.text.trim()) textParts.push(p.text.trim())
+            const imgUrlObj = p.image_url
+            const rawUrl =
+              typeof imgUrlObj === 'string'
+                ? imgUrlObj
+                : imgUrlObj && typeof imgUrlObj === 'object'
+                  ? String((imgUrlObj as { url?: unknown }).url ?? '')
+                  : ''
+            const match = rawUrl.match(/^data:(image\/(?:png|jpeg|webp));base64,(.+)$/i)
+            if (match && images.length < 4) {
+              images.push({
+                mediaType: match[1].toLowerCase() as 'image/png' | 'image/jpeg' | 'image/webp',
+                base64: match[2],
+              })
+            }
+          }
+        }
+      }
+    }
+    const text = textParts.join('\n\n').trim() || 'Evaluate this input.'
+    if (text.startsWith('{') && text.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(text) as Record<string, unknown>
+        if (parsed && typeof parsed === 'object' && 'questions' in parsed && ('state' in parsed || 'input' in parsed)) {
+          return buildDecisionPayload(parsed, upstreamModelId)
+        }
+      } catch {
+        /* treat as plain text */
+      }
+    }
+    const payload: Record<string, unknown> = {
+      model: upstreamModelId,
+      state: text,
+      questions: {
+        assessment: {
+          type: 'noul',
+          instructions: text.length <= 400 ? text : 'Is the statement or request valid, accurate, and affirmative?',
+        },
+        is_safe: {
+          type: 'noul',
+          instructions: 'Is this content safe, benign, and policy-compliant?',
+        },
+        category: {
+          type: 'choice',
+          instructions: 'Which category best fits this content?',
+          criteria: {
+            coding: 'Software engineering, code, DevOps, or technical debugging',
+            general: 'General knowledge, question answering, or conversation',
+            analysis: 'Data analysis, classification, moderation, or reasoning',
+            creative: 'Creative writing, brainstorming, or storytelling',
+          },
+        },
+        complexity: {
+          type: 'score',
+          instructions: 'How complex is this content or request?',
+          criteria: ['trivial', 'easy', 'moderate', 'hard', 'expert'],
+        },
+      },
+    }
+    if (images.length > 0) payload.images = images
+    return payload
+  }
+
+  return {
+    ...body,
+    model: upstreamModelId,
+  }
+}
+
+async function proxyDecisionRequest(input: {
+  request: FastifyRequest
+  reply: FastifyReply
+  playground?: boolean
+}) {
+  const { request, reply, playground } = input
+  const started = Date.now()
+  const sendError = (status: number, message: string, type?: string) =>
+    sendOpenAiError(reply, status, message, type)
+
+  const auth = playground
+    ? playgroundSessionUser(request) ?? { error: 'Sign in required', status: 401 }
+    : authenticateApiKey(request)
+  if (isAuthFailure(auth)) {
+    return sendError(
+      auth.status,
+      auth.error,
+      auth.status === 402 ? 'billing_error' : 'authentication_error',
+    )
+  }
+
+  const body = (request.body ?? {}) as Record<string, unknown>
+  const publicModelId = String(body.model ?? '').trim()
+  if (!publicModelId) {
+    return sendError(400, 'model is required', 'invalid_request_error')
+  }
+
+  const model = resolveDecisionModel(publicModelId)
+  if (!model || model.status !== 'active') {
+    return sendError(404, `Model '${publicModelId}' not found`, 'not_found_error')
+  }
+
+  const upstreamModelId = (model.upstream_id?.trim() || model.id).trim()
+  if (
+    !isDecisionModelId(upstreamModelId) &&
+    !isDecisionModelId(publicModelId) &&
+    model.provider.trim().toLowerCase() !== 'jev group'
+  ) {
+    return sendError(
+      400,
+      `Model '${publicModelId}' is not a Jev Group Decision model. Use /v1/chat/completions, /v1/responses, or /v1/messages instead.`,
+      'invalid_request_error',
+    )
+  }
+
+  const freeModel = model.provider.trim().toLowerCase() === 'free' || model.id.startsWith('free/')
+  const limited = enforceGatewayRateLimit(request, reply, auth, sendError, {
+    keyLimit: RL.gatewayKey.limit,
+    keyWindowMs: RL.gatewayKey.windowMs,
+    scope: 'v1',
+    isPaidModel: !freeModel,
+  })
+  if (limited) return limited
+
+  if (freeModel) {
+    const access = getFreeTierAccess(auth.user.id)
+    if (!access.allowed) {
+      return sendError(402, freeTierExhaustedMessage(access), 'billing_error')
+    }
+  } else {
+    if (auth.user.balance_tokens <= 0) {
+      return sendError(402, 'Insufficient balance', 'billing_error')
+    }
+    if (
+      auth.key.spend_limit_tokens !== null &&
+      auth.key.spent_tokens + (auth.key.reserved_tokens || 0) >= auth.key.spend_limit_tokens
+    ) {
+      return sendError(402, 'API key spend limit reached', 'billing_error')
+    }
+  }
+
+  const targets = selectProviderTargets('apinex')
+  if (targets.length === 0) {
+    return sendError(503, 'Service temporarily unavailable', 'api_error')
+  }
+
+  const rates: ModelRates = freeModel
+    ? { inputDollarsPer1M: 0, outputDollarsPer1M: 0 }
+    : {
+        inputDollarsPer1M: dollarsFromMicros(model.input_price_micros),
+        outputDollarsPer1M: dollarsFromMicros(model.output_price_micros),
+      }
+  if (!freeModel && !modelHasPrice(rates)) {
+    return sendError(503, 'This model has no price configured yet', 'api_error')
+  }
+
+  const promoPlan = promoBillingPlan(auth.user.id, model.id, rates.inputDollarsPer1M, rates.outputDollarsPer1M)
+  if ('block' in promoPlan && promoPlan.block) {
+    return sendError(409, promoPlan.block, 'promo_event')
+  }
+
+  const rawReservation = estimateModelReservationTokens(body, 1)
+  const reservationEstimate = freeModel
+    ? rawReservation
+    : {
+        ...rawReservation,
+        costTokens: Math.max(
+          1,
+          Math.ceil(
+            chargeUsdMicros(
+              rawReservation.inputTokens,
+              0,
+              rates.inputDollarsPer1M,
+              rates.outputDollarsPer1M,
+            ) * 1.08,
+          ),
+        ),
+      }
+  if (freeModel) {
+    const access = getFreeTierAccess(auth.user.id)
+    if (!access.unlimited && access.remaining !== null && reservationEstimate.costTokens > access.remaining) {
+      return sendError(
+        402,
+        `Free-model allowance is too low for this request. It requires up to ${reservationEstimate.costTokens.toLocaleString('en-US')} tokens.`,
+        'billing_error',
+      )
+    }
+  }
+
+  const reservation = tryReserveTokens({
+    userId: auth.user.id,
+    apiKeyId: auth.key.id,
+    amount: freeModel
+      ? 0
+      : promoPlan.discountPct > 0
+        ? discountedTokenCost(reservationEstimate.costTokens, promoPlan.discountPct)
+        : reservationEstimate.costTokens,
+    modelId: model.id,
+    path: '/v1/decisions',
+    allowRestrictedCredits: true,
+  })
+  if (!reservation.ok) {
+    return sendError(reservation.status, reservation.error, 'billing_error')
+  }
+
+  const payload = buildDecisionPayload(body, upstreamModelId)
+  const baseUrls = baseUrlsForUpstream('apinex')
+  let lastStatus = 502
+  let lastError = 'Upstream decision request failed'
+
+  for (let i = 0; i < targets.length; i += 1) {
+    const target = targets[i]!
+    const baseUrl = baseUrls[i % baseUrls.length]!
+    try {
+      const upstream = await upstreamPost(
+        baseUrl,
+        'decisions',
+        target.secret,
+        payload,
+        dispatcherForProxyIndex(target.proxyIndex ?? null),
+        undefined,
+        i < targets.length - 1,
+        'apinex',
+      )
+
+      if (!upstream.ok) {
+        const errorBody = (await upstream.json().catch(() => ({}))) as Record<string, unknown>
+        lastStatus = upstream.status
+        lastError = extractErrorMessage(errorBody, upstream.status)
+        if (upstream.status === 401 || upstream.status === 402 || upstream.status === 403) {
+          markProviderSecretFailed(target.secret, lastError, upstream.status)
+          continue
+        }
+        if (isUpstreamTransient(upstream.status, lastError) && i < targets.length - 1) {
+          continue
+        }
+        break
+      }
+
+      const data = (await upstream.json()) as Record<string, unknown>
+      stripUpstreamVendorFields(data)
+
+      const billed = resolveBillableUsage({
+        body,
+        data,
+        parsed: parseUsage(data),
+        rates,
+        freeModel,
+      })
+
+      recordUsage({
+        userId: auth.user.id,
+        apiKeyId: auth.key.id,
+        allowanceWeight: freeModel ? 1 : 0,
+        modelId: model.id,
+        provider: model.provider,
+        inputTokens: billed.inputTokens,
+        outputTokens: billed.outputTokens,
+        costTokens: billed.costTokens,
+        latencyMs: Date.now() - started,
+        status: 'ok',
+        reservationId: reservation.reservationId,
+      })
+
+      const usage = publicUsage(data.usage, billed.costTokens, {
+        inputTokens: billed.inputTokens,
+        outputTokens: billed.outputTokens,
+      })
+
+      return {
+        ...data,
+        model: publicModelId,
+        usage,
+        ...(playground
+          ? {
+              usageMeta: {
+                free: freeModel,
+                costTokens: freeModel
+                  ? chargeTokens(billed.inputTokens, billed.outputTokens, 1)
+                  : billed.costTokens,
+                chargedUsd: freeModel ? null : usdFromTokens(billed.costTokens),
+                latencyMs: Date.now() - started,
+              },
+            }
+          : {}),
+      }
+    } catch (reason) {
+      lastStatus = 502
+      lastError = upstreamFailureMessage(reason, payload, i < targets.length - 1, 'apinex')
+    }
+  }
+
+  recordUsage({
+    userId: auth.user.id,
+    apiKeyId: auth.key.id,
+    modelId: model.id,
+    provider: model.provider,
+    inputTokens: 0,
+    outputTokens: 0,
+    costTokens: 0,
+    latencyMs: Date.now() - started,
+    status: 'error',
+    reservationId: reservation.reservationId,
+  })
+  const responseStatus =
+    lastStatus === 401 || lastStatus === 402 || lastStatus === 403
+      ? 503
+      : lastStatus >= 400 && lastStatus < 600
+        ? lastStatus
+        : 502
+  return sendError(responseStatus, clientSafeUpstreamError(responseStatus, lastError), 'api_error')
 }
 
 /**

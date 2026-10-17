@@ -877,6 +877,10 @@
   color: var(--prov-muse);
 }
 
+.provider-label.provider-jev {
+  color: var(--prov-jev);
+}
+
 .admin-badge,
 .admin-chip {
   display: inline-flex;

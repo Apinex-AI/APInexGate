@@ -187,7 +187,7 @@ function UsageRow({ event }: { event: CustomerUsageEvent }) {
       <td className="usage-cell-model">
         <div className="usage-model-block">
           <div className="usage-model-icon-frame" aria-hidden="true">
-            <ProviderIcon provider={event.provider || ''} size={15} />
+            <ProviderIcon provider={event.provider || ''} modelId={event.modelId} size={15} />
           </div>
           <div className="usage-model-info">
             <strong>{event.modelId || '—'}</strong>
@@ -204,7 +204,7 @@ function UsageRow({ event }: { event: CustomerUsageEvent }) {
       <td className="usage-cell-billed mono">
         <strong>
           {event.freeModel
-            ? formatFullTokenCount(Math.ceil((event.inputTokens + event.outputTokens) * event.tokenWeight))
+            ? formatFullTokenCount(event.inputTokens + event.outputTokens)
             : formatUsdFromTokens(event.costTokens)}
         </strong>
       </td>

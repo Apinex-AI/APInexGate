@@ -584,6 +584,19 @@ db.exec(`
   db.prepare(`UPDATE model_catalog SET provider = 'Kimi' WHERE provider = 'Moonshot'`).run()
   db.prepare(`UPDATE model_catalog SET provider = 'GLM' WHERE provider IN ('Zhipu', 'Z.ai')`).run()
   db.prepare(`UPDATE model_catalog SET provider = 'Grok' WHERE provider = 'xAI'`).run()
+  db.prepare(`
+    UPDATE model_catalog
+    SET provider = 'Jev Group', output_price_micros = 0
+    WHERE lower(id) NOT LIKE 'free/%'
+      AND lower(provider) != 'free'
+      AND (
+        lower(id) LIKE '%jev%' OR
+        lower(id) LIKE '%drex%' OR
+        lower(id) LIKE '%subq%' OR
+        lower(id) LIKE '%decision%' OR
+        lower(provider) IN ('jev', 'jev group', 'jev-group', 'decisions', 'typesafe', 'subq')
+      )
+  `).run()
 }
 
 

@@ -153,11 +153,31 @@ export function ModelPreviewModal({
   )
 }
 
+function isDecisionPreviewModel(model: ChatModel) {
+  const lowerId = model.id.trim().toLowerCase()
+  const lowerCat = model.catalogId.trim().toLowerCase()
+  const lowerProv = model.provider.trim().toLowerCase()
+  return (
+    lowerProv === 'jev group' ||
+    lowerProv === 'jev' ||
+    lowerProv === 'decisions' ||
+    lowerId.includes('jev-') ||
+    lowerCat.includes('jev-') ||
+    lowerId.includes('drex') ||
+    lowerCat.includes('drex') ||
+    lowerId.includes('subq') ||
+    lowerCat.includes('subq') ||
+    lowerId.includes('decision') ||
+    lowerCat.includes('decision')
+  )
+}
+
 function ChatBody({ model, onCopy }: { model: ChatModel; onCopy: (text: string) => void }) {
   const [apiKey, setApiKey] = useState<string | null>(null)
   const [lang, setLang] = useState<CodeLang>('curl')
   const [copiedCode, setCopiedCode] = useState(false)
   const [statusModel, setStatusModel] = useState<StatusModel | null>(() => findStatusModel(statusModelsCache, model))
+  const isDecision = isDecisionPreviewModel(model)
 
   useEffect(() => {
     let cancelled = false
@@ -182,9 +202,9 @@ function ChatBody({ model, onCopy }: { model: ChatModel; onCopy: (text: string) 
   }, [model.catalogId, model.id, model.name])
 
   function getCodeText() {
-    if (lang === 'python') return pythonSnippet(model.id, apiKey)
-    if (lang === 'node') return nodeSnippet(model.id, apiKey)
-    return curlText(model.id, apiKey)
+    if (lang === 'python') return pythonSnippet(model.id, apiKey, isDecision)
+    if (lang === 'node') return nodeSnippet(model.id, apiKey, isDecision)
+    return curlText(model.id, apiKey, isDecision)
   }
 
   return (
@@ -195,7 +215,7 @@ function ChatBody({ model, onCopy }: { model: ChatModel; onCopy: (text: string) 
           <article className="status-row mp-model-status-row">
             <div className="mp-status-header-line">
               <div className="status-row-id">
-                <ProviderIcon provider={model.provider} size={18} />
+                <ProviderIcon provider={model.provider} modelId={model.catalogId} size={18} />
                 <div>
                   <strong>{model.name}</strong>
                 </div>
@@ -226,7 +246,7 @@ function ChatBody({ model, onCopy }: { model: ChatModel; onCopy: (text: string) 
           <article className="status-row mp-model-status-row">
             <div className="mp-status-header-line">
               <div className="status-row-id">
-                <ProviderIcon provider={model.provider} size={18} />
+                <ProviderIcon provider={model.provider} modelId={model.catalogId} size={18} />
                 <div>
                   <strong>{model.name}</strong>
                 </div>
@@ -317,7 +337,7 @@ function ChatBody({ model, onCopy }: { model: ChatModel; onCopy: (text: string) 
               <span />
               <span />
             </div>
-            <span className="mp-terminal-endpoint">POST {apiBase()}/chat/completions</span>
+            <span className="mp-terminal-endpoint">POST {apiBase()}/{isDecision ? 'decisions' : 'chat/completions'}</span>
             <span className="mp-terminal-target">{model.id}</span>
           </div>
           <pre className="mp-code-pre">
@@ -329,8 +349,27 @@ function ChatBody({ model, onCopy }: { model: ChatModel; onCopy: (text: string) 
   )
 }
 
-function pythonSnippet(modelId: string, apiKey: string | null) {
+function pythonSnippet(modelId: string, apiKey: string | null, isDecision = false) {
   const token = apiKey?.trim() || '$API_KEY'
+  if (isDecision) {
+    return `import requests
+
+response = requests.post(
+    "${apiBase()}/decisions",
+    headers={"Authorization": "Bearer ${token}"},
+    json={
+        "model": "${modelId}",
+        "state": "User wants to deploy a Node.js app with Nginx.",
+        "questions": {
+            "is_safe": {
+                "type": "noul",
+                "instructions": "Is this request safe and benign?"
+            }
+        }
+    },
+)
+print(response.json()["answers"])`
+  }
   return `from openai import OpenAI
 
 client = OpenAI(
@@ -345,8 +384,30 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)`
 }
 
-function nodeSnippet(modelId: string, apiKey: string | null) {
+function nodeSnippet(modelId: string, apiKey: string | null, isDecision = false) {
   const token = apiKey?.trim() || '$API_KEY'
+  if (isDecision) {
+    return `const response = await fetch("${apiBase()}/decisions", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer ${token}",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    model: "${modelId}",
+    state: "User wants to deploy a Node.js app with Nginx.",
+    questions: {
+      is_safe: {
+        type: "noul",
+        instructions: "Is this request safe and benign?",
+      },
+    },
+  }),
+});
+
+const data = await response.json();
+console.log(data.answers);`
+  }
   return `import OpenAI from "openai";
 
 const client = new OpenAI({
@@ -373,8 +434,16 @@ function pickKey(keys: CustomerApiKey[]) {
   })[0].secret
 }
 
-function curlText(modelId: string, apiKey: string | null) {
+function curlText(modelId: string, apiKey: string | null, isDecision = false) {
   const token = apiKey?.trim() || '$API_KEY'
+  if (isDecision) {
+    return [
+      `curl ${apiBase()}/decisions \\`,
+      `  -H "Authorization: Bearer ${token}" \\`,
+      '  -H "Content-Type: application/json" \\',
+      `  -d '{"model":"${modelId}","state":"User wants to deploy a Node.js app with Nginx.","questions":{"is_safe":{"type":"noul","instructions":"Is this request safe?"}}}'`,
+    ].join('\n')
+  }
   return [
     `curl ${apiBase()}/chat/completions \\`,
     `  -H "Authorization: Bearer ${token}" \\`,

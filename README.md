@@ -16,11 +16,12 @@ It gives you a ready-to-run, self-hosted AI API proxy with a modern customer das
   - `POST /v1/chat/completions` (OpenAI Chat Completions compatible)
   - `POST /v1/messages` (Anthropic Messages compatible)
   - `POST /v1/responses` (OpenAI Responses compatible)
+  - `POST /v1/decisions` (Jev Group Decisions API compatible)
   - `GET /v1/models` (OpenAI model list)
-  - Full support for SSE streaming, tool/function calling, and reasoning tokens.
+  - Full support for SSE streaming, tool/function calling, reasoning tokens, and typed decisions.
 - **1-Click APInex Catalog & Pricing Import**
-  - Connect your `sk-apx-...` API key from [apinex.bond](https://apinex.bond) and click **Import all APInex models** in **Admin → Models** to load all free and paid models with official APInex context windows, token weights, and `$ / 1M` pricing.
-  - Edit input/output `$ / 1M` prices or free-model token weights at any time to set your own reseller margin.
+  - Connect your `sk-apx-...` API key from [apinex.bond](https://apinex.bond) and click **Import all APInex models** in **Admin → Models** to load all free, paid, and Jev Group decision models with official APInex context windows and `$ / 1M` pricing.
+  - Edit input/output `$ / 1M` prices at any time to set your own reseller margin.
 - **Built-In Monetization & Customer Portal**
   - **Paid Models:** Billed per token (`$ / 1M` input & output) from the customer's USD wallet balance.
   - **Free Models (`free/*`):** Metered against the customer's active subscription token pool or daily free token allowance.
@@ -52,8 +53,8 @@ npm run dev:full
    - APInexGate automatically syncs your upstream USD balance, RPM plan, and active subscription token pool.
 3. **Import Models & Set Your Margin:**
    - Go to **Admin → Models** and click **Import all APInex models**.
-   - All available paid and `free/*` models are imported automatically with APInex's default `$ / 1M` rates and token weights.
-   - Click the edit icon next to any paid model's price to set your own custom **Input / Output `$ / 1M`** resale price, or adjust `tokenWeight` on free models.
+   - All available paid, `free/*`, and Jev Group decision models are imported automatically with APInex's default `$ / 1M` rates.
+   - Click the edit icon next to any paid model's price to set your own custom **Input / Output `$ / 1M`** resale price.
 
 ---
 
@@ -76,9 +77,13 @@ Customers authenticate with their gateway API key (`Authorization: Bearer sk-...
 | Endpoint | Protocol | Description |
 | :--- | :--- | :--- |
 | `GET /v1/models` | OpenAI | Lists active models in your catalog |
+| `GET /v1/balance` | Gateway | Spendable USD wallet balance & API key spend limits |
+| `GET /v1/subscription` | Gateway | Active subscription token pool or daily free-tier allowance |
+| `GET /v1/rpm` | Gateway | Active account RPM limit & tier |
 | `POST /v1/chat/completions` | OpenAI Chat | Chat completions (streaming, tools, reasoning) |
 | `POST /v1/messages` | Anthropic | Claude Messages API format (streaming, tools) |
 | `POST /v1/responses` | OpenAI Responses | Responses API format (streaming, tools) |
+| `POST /v1/decisions` | Jev Group Decisions | Typed classification, moderation & scoring |
 
 ---
 

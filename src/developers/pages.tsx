@@ -32,22 +32,27 @@ export function DevOverviewPage() {
         </p>
       </Section>
 
-      <Section title="Three places to start">
+      <Section title="Where to start">
         <div className="ref-tiles">
           <Link className="ref-tile" to="/docs/models">
             <em>Models</em>
-            <strong>Chat, Responses, Messages</strong>
-            <span>Drop-in routes for OpenAI clients, Codex, and Claude Code.</span>
-          </Link>
-          <Link className="ref-tile" to="/docs/auth">
-            <em>Auth</em>
-            <strong>Dashboard keys</strong>
-            <span>Send the secret as Bearer or x-api-key. Keys are minted in the dashboard.</span>
+            <strong>Chat, Responses, Messages &amp; Decisions</strong>
+            <span>Drop-in routes for OpenAI clients, Codex, Claude Code, and Jev Group Decision models.</span>
           </Link>
           <Link className="ref-tile" to="/docs/balance">
             <em>Wallet</em>
-            <strong>Balance in one call</strong>
-            <span>USD left to spend, in-flight holds, the key cap, and remaining subscription tokens.</span>
+            <strong>GET /v1/balance</strong>
+            <span>Spendable USD balance, in-flight holds, and API key spend limits.</span>
+          </Link>
+          <Link className="ref-tile" to="/docs/subscription">
+            <em>Quota</em>
+            <strong>GET /v1/subscription</strong>
+            <span>Active subscription token pool or daily free-tier allowance for free/* models.</span>
+          </Link>
+          <Link className="ref-tile" to="/docs/rpm">
+            <em>Throughput</em>
+            <strong>GET /v1/rpm</strong>
+            <span>Account requests-per-minute (RPM) limit, active tier, and rate-limit headers.</span>
           </Link>
         </div>
       </Section>
@@ -59,7 +64,7 @@ export function DevOverviewPage() {
           </li>
           <li>Copy a model id from the catalog. Paid and zero-price ids use the same path.</li>
           <li>POST JSON. Successful replies carry usage so you can reconcile spend.</li>
-          <li>Read wallet dollars and the subscription remainder from the balance route before a long run.</li>
+          <li>Check wallet balance (<code className="ref-inline">/v1/balance</code>), subscription quota (<code className="ref-inline">/v1/subscription</code>), or RPM limit (<code className="ref-inline">/v1/rpm</code>) anytime.</li>
         </ol>
         <CodeBlock
           title="Chat Completions"
@@ -72,17 +77,18 @@ export function DevOverviewPage() {
   }'`}
         />
         <CodeBlock
-          title="Wallet and subscription tokens"
-          code={`curl ${API_ORIGIN()}/v1/balance \\
-  -H "${AUTH_HEADER}"`}
+          title="Balance, Subscription & RPM"
+          code={`curl ${API_ORIGIN()}/v1/balance -H "${AUTH_HEADER}"
+curl ${API_ORIGIN()}/v1/subscription -H "${AUTH_HEADER}"
+curl ${API_ORIGIN()}/v1/rpm -H "${AUTH_HEADER}"`}
         />
       </Section>
 
-      <Section title="Two buckets, one key">
+      <Section title="Three dedicated status endpoints">
         <p>
-          Crypto checkout adds dollars to a prepaid wallet. Those dollars pay catalog models at the published rate per million tokens.
-          A separate subscription allowance covers zero-price models: the daily free allowance until you buy a subscription, then the subscription itself.
-          Both figures come back from <code className="ref-inline">GET /v1/balance</code>. There is no second account endpoint.
+          Your prepaid USD wallet covers paid catalog models at their published input and output rate per million tokens (<code className="ref-inline">GET /v1/balance</code>).
+          A separate subscription or daily free allowance covers zero-price (<code className="ref-inline">free/*</code>) models (<code className="ref-inline">GET /v1/subscription</code>).
+          Your account's requests-per-minute throughput ceiling is reported on <code className="ref-inline">GET /v1/rpm</code>.
         </p>
       </Section>
 
@@ -155,17 +161,17 @@ export function DevBalancePage() {
       <PageHeader
         eyebrow="Start"
         title="Balance"
-        lead="One authenticated read returns the prepaid wallet, open holds, the calling key's cap, and the subscription tokens left for zero-price models."
+        lead="Retrieve your spendable prepaid USD wallet balance, active in-flight holds, and the calling API key's spend limits."
       />
       <EndpointBadge method="GET" path="/v1/balance" />
 
       <Section title="Request">
         <p>
-          The same secret used for chat works here, as Bearer or <code className="ref-inline">x-api-key</code>. No body.
-          There is no separate tokens or subscription route on the key API.
+          Authenticate with the same API key used for model calls, as <code className="ref-inline">Authorization: Bearer sk-…</code> or <code className="ref-inline">x-api-key</code>.
+          For subscription/free-tier quotas use <Link to="/docs/subscription">GET /v1/subscription</Link>, and for rate limits use <Link to="/docs/rpm">GET /v1/rpm</Link>.
         </p>
         <CodeBlock
-          title="Read the wallet"
+          title="Read the USD wallet"
           code={`curl ${API_ORIGIN()}/v1/balance \\
   -H "${AUTH_HEADER}"`}
         />
@@ -186,31 +192,9 @@ export function DevBalancePage() {
     "reserved_usd": 0.001024,
     "remaining_usd": 4.158976,
     "limit_reached": false
-  },
-  "subscription": {
-    "active": true,
-    "label": "30 days",
-    "unlimited": false,
-    "limit": 500000000,
-    "used": 1240000,
-    "remaining": 498760000,
-    "expires_at": null,
-    "resets_at": null,
-    "allowed": true
   }
 }`}
         />
-      </Section>
-
-      <Section title="Wallet versus subscription tokens">
-        <p>
-          Top-ups land as dollars. A $5 payment is $5 of spendable balance. Pay-as-you-go models never convert that wallet into a token price — <code className="ref-inline">balance_usd</code> is the figure to bill against.
-        </p>
-        <p>
-          Zero-price catalog models do not touch that wallet. They draw <code className="ref-inline">subscription</code>.
-          Without a subscription, that object is the daily free allowance and <code className="ref-inline">resets_at</code> is the next 00:00 UTC.
-          After a pack is purchased on <Link to="/subscriptions">Subscriptions</Link>, <code className="ref-inline">active</code> is true and the remainder is the subscription, not the daily bucket.
-        </p>
       </Section>
 
       <Section title="Holds">
@@ -244,15 +228,92 @@ export function DevBalancePage() {
             { name: 'api_key.reserved_usd', type: 'number', description: 'Dollars currently locked by in-flight calls on this key.' },
             { name: 'api_key.remaining_usd', type: 'number | null', description: 'Room left under the cap after settled and locked amounts. Null when the key has no cap.' },
             { name: 'api_key.limit_reached', type: 'boolean', description: 'True when settled plus locked spend has used up the key cap.' },
-            { name: 'subscription.active', type: 'boolean', description: 'True when a purchased subscription is the live allowance. False means the daily free bucket.' },
-            { name: 'subscription.label', type: 'string', description: 'Pack name, or FREE while the daily bucket is in effect.' },
-            { name: 'subscription.unlimited', type: 'boolean', description: 'True only if the live subscription has no ceiling.' },
-            { name: 'subscription.limit', type: 'number | null', description: 'Size of the live subscription or the daily free bucket. Null when unlimited.' },
-            { name: 'subscription.used', type: 'number', description: 'Units already drawn from that pack or from today\'s free bucket.' },
-            { name: 'subscription.remaining', type: 'number | null', description: 'Units still available for zero-price models. Null when unlimited.' },
-            { name: 'subscription.expires_at', type: 'string | null', description: 'ISO time when a dated subscription ends. Null for the daily bucket and for subscriptions that do not expire.' },
-            { name: 'subscription.resets_at', type: 'string | null', description: 'Next 00:00 UTC refresh of the daily free bucket. Null while a subscription is active.' },
-            { name: 'subscription.allowed', type: 'boolean', description: 'Whether another zero-price model call can still be metered right now.' },
+          ]}
+        />
+      </Section>
+    </div>
+  )
+}
+
+export function DevSubscriptionPage() {
+  return (
+    <div className="ref-page">
+      <PageHeader
+        eyebrow="Start"
+        title="Subscription"
+        lead="Check the active subscription token pool or daily free-tier token allowance for zero-price (free/*) models."
+      />
+      <EndpointBadge method="GET" path="/v1/subscription" />
+
+      <Section title="Request">
+        <p>
+          Authenticate with your API key via <code className="ref-inline">Authorization: Bearer sk-…</code> or <code className="ref-inline">x-api-key</code>.
+          Zero-price models (<code className="ref-inline">free/*</code>) never touch your USD wallet — they draw from this quota instead.
+        </p>
+        <CodeBlock
+          title="Read subscription & free quota"
+          code={`curl ${API_ORIGIN()}/v1/subscription \\
+  -H "${AUTH_HEADER}"`}
+        />
+      </Section>
+
+      <Section title="Response (Active Subscription)">
+        <CodeBlock
+          title="200 OK"
+          language="json"
+          code={`{
+  "object": "subscription",
+  "mode": "subscription",
+  "active": true,
+  "plan": "30_days",
+  "plan_label": "30 days",
+  "unlimited": false,
+  "token_limit": 500000000,
+  "tokens_used": 1240000,
+  "tokens_remaining": 498760000,
+  "expires_at_utc": "2026-11-16T12:00:00.000Z",
+  "resets_at_utc": null,
+  "allowed": true
+}`}
+        />
+      </Section>
+
+      <Section title="Response (Daily Free Tier)">
+        <CodeBlock
+          title="200 OK"
+          language="json"
+          code={`{
+  "object": "subscription",
+  "mode": "free",
+  "active": false,
+  "plan": null,
+  "plan_label": "FREE",
+  "unlimited": false,
+  "token_limit": 10000000,
+  "tokens_used": 250000,
+  "tokens_remaining": 9750000,
+  "expires_at_utc": null,
+  "resets_at_utc": "2026-10-18T00:00:00.000Z",
+  "allowed": true
+}`}
+        />
+      </Section>
+
+      <Section title="Fields">
+        <ParamTable
+          showRequirements={false}
+          rows={[
+            { name: 'mode', type: '"subscription" | "free"', description: '"subscription" when a paid/promo subscription is active, or "free" when using the daily free allowance.' },
+            { name: 'active', type: 'boolean', description: 'True when an active subscription is running; false when on the daily free tier.' },
+            { name: 'plan', type: 'string | null', description: 'Normalized subscription plan key (e.g. "3_days", "10_days", "30_days"), or null on the daily free tier.' },
+            { name: 'plan_label', type: 'string', description: 'Human-readable plan name (e.g. "30 days") or "FREE".' },
+            { name: 'unlimited', type: 'boolean', description: 'True if the active subscription has no token cap.' },
+            { name: 'token_limit', type: 'number | null', description: 'Total token allowance for the active subscription or daily free bucket (null when unlimited).' },
+            { name: 'tokens_used', type: 'number', description: 'Tokens consumed so far in the current subscription period or UTC day.' },
+            { name: 'tokens_remaining', type: 'number | null', description: 'Remaining tokens available for free/* models (null when unlimited).' },
+            { name: 'expires_at_utc', type: 'string | null', description: 'ISO 8601 UTC timestamp when the active subscription ends, or null on the daily free tier.' },
+            { name: 'resets_at_utc', type: 'string | null', description: 'Next 00:00 UTC reset timestamp for the daily free bucket, or null while a subscription is active.' },
+            { name: 'allowed', type: 'boolean', description: 'Whether another free/* model request is permitted right now.' },
           ]}
         />
       </Section>
@@ -298,7 +359,7 @@ function money(cents: number) {
   return Number.isInteger(dollars) ? `$${dollars}` : `$${dollars.toFixed(2)}`
 }
 
-export function DevErrorsPage() {
+export function DevRpmPage() {
   const [limits, setLimits] = useState<PublicRateLimits>(DEFAULT_RATE_LIMITS)
 
   useEffect(() => {
@@ -330,53 +391,50 @@ export function DevErrorsPage() {
     <div className="ref-page">
       <PageHeader
         eyebrow="Start"
-        title="Errors and throughput"
-        lead="Failures keep the envelope of the route family you called: OpenAI-shaped on chat and responses, Anthropic-shaped on messages."
+        title="RPM (Rate Limits)"
+        lead="Inspect your account's active requests-per-minute (RPM) limit, plan tier, and response rate-limit headers."
       />
+      <EndpointBadge method="GET" path="/v1/rpm" />
 
-      <Section title="Status codes you will actually see">
-        <div className="ref-status">
-          <div>
-            <strong>401</strong>
-            <span>No secret, or the secret is revoked or unknown.</span>
-          </div>
-          <div>
-            <strong>402</strong>
-            <span>The wallet or the key cap cannot cover the hold, or the subscription remainder is too small for a zero-price model. Add dollars, buy subscription tokens, lower max output, or wait for open holds to settle.</span>
-          </div>
-          <div>
-            <strong>400</strong>
-            <span>The JSON is missing a required field or uses a type the route rejects.</span>
-          </div>
-          <div>
-            <strong>429</strong>
-            <span>This account already used its requests-per-minute budget.</span>
-          </div>
-          <div>
-            <strong>502 / 503</strong>
-            <span>The provider side failed. Retry with backoff; a failed call returns its hold.</span>
-          </div>
-        </div>
-      </Section>
-
-      <Section title="Error body (OpenAI-style)">
+      <Section title="Request">
+        <p>
+          Authenticate with your API key via <code className="ref-inline">Authorization: Bearer sk-…</code> or <code className="ref-inline">x-api-key</code>.
+        </p>
         <CodeBlock
-          language="json"
-          title="Example"
-          code={`{
-  "error": {
-    "message": "Missing API key (Bearer or x-api-key)",
-    "type": "authentication_error",
-    "param": null,
-    "code": null
-  }
-}`}
+          title="Read account RPM"
+          code={`curl ${API_ORIGIN()}/v1/rpm \\
+  -H "${AUTH_HEADER}"`}
         />
       </Section>
 
-      <Section title="How fast you can call">
+      <Section title="Response">
+        <CodeBlock
+          title="200 OK"
+          language="json"
+          code={`{
+  "object": "rpm",
+  "rpm": 30,
+  "plan": "standard",
+  "label": "30 RPM",
+  "source": "plan",
+  "expires_at_utc": "2026-11-16T12:00:00.000Z"
+}`}
+        />
+        <ParamTable
+          showRequirements={false}
+          rows={[
+            { name: 'rpm', type: 'number', description: 'Active requests-per-minute ceiling for this account across all models.' },
+            { name: 'plan', type: '"free" | "standard" | "high" | "custom"', description: 'Active RPM plan key on the account.' },
+            { name: 'label', type: 'string', description: 'Human-readable RPM tier label (e.g. "5 RPM", "30 RPM", "Custom · 120 RPM").' },
+            { name: 'source', type: '"free" | "plan" | "grant"', description: 'Where the active RPM limit comes from: default free tier, purchased plan, or admin grant.' },
+            { name: 'expires_at_utc', type: 'string | null', description: 'ISO 8601 UTC timestamp when the RPM plan or grant expires, or null on the default free tier.' },
+          ]}
+        />
+      </Section>
+
+      <Section title="Available RPM plans">
         <p>
-          Chat, responses, and messages share one rolling 60-second budget per account. Extra keys do not multiply it. The ceiling is the RPM plan on the account, not the model price. The free plan is on every account until you raise it.
+          Chat, responses, messages, and decisions share one rolling 60-second budget per account. Extra keys do not multiply it.
         </p>
 
         <div className="ref-table-wrap">
@@ -405,7 +463,7 @@ export function DevErrorsPage() {
                     ) : plan.priceCents <= 0 ? (
                       'Included on every account'
                     ) : (
-                      'Crypto checkout on the RPM page'
+                      <Link to="/rpm">Upgrade on the RPM page</Link>
                     )}
                   </td>
                 </tr>
@@ -414,19 +472,8 @@ export function DevErrorsPage() {
           </table>
         </div>
 
-        <Callout title="Raise the account ceiling" tone="ok">
-          <p>
-            RPM is separate from subscription tokens and from the dollar wallet. Open <Link to="/rpm">RPM</Link> to move from the free plan to a paid ceiling. Paid plans currently check out with crypto. Card checkout is not available for RPM yet. A ceiling that is not listed is arranged in support.
-          </p>
-          <p>
-            <Link className="btn btn-primary btn-sm" to="/rpm">
-              Open RPM
-            </Link>
-          </p>
-        </Callout>
-
-        <h3>What a 429 looks like</h3>
-        <p>The body type is <code className="ref-inline">rate_limit_error</code>. These headers ride along:</p>
+        <h3>Rate-limit headers</h3>
+        <p>Every gateway response includes these headers, and <code className="ref-inline">429</code> responses add <code className="ref-inline">Retry-After</code>:</p>
         <ul>
           <li>
             <code>X-RateLimit-Limit</code> — the ceiling that applied (your account plan).
@@ -441,7 +488,58 @@ export function DevErrorsPage() {
             <code>Retry-After</code> — seconds to wait before the next attempt, present on 429.
           </li>
         </ul>
-        <p>Agents should back off with jitter instead of retrying on a fixed interval.</p>
+      </Section>
+    </div>
+  )
+}
+
+export function DevErrorsPage() {
+  return (
+    <div className="ref-page">
+      <PageHeader
+        eyebrow="Start"
+        title="Errors"
+        lead="Failures keep the envelope of the route family you called: OpenAI-shaped on chat, responses, and decisions, Anthropic-shaped on messages."
+      />
+
+      <Section title="Status codes you will actually see">
+        <div className="ref-status">
+          <div>
+            <strong>401</strong>
+            <span>No secret, or the secret is revoked or unknown.</span>
+          </div>
+          <div>
+            <strong>402</strong>
+            <span>The wallet or the key cap cannot cover the hold, or the subscription remainder is too small for a zero-price model. Add dollars, buy subscription tokens, lower max output, or wait for open holds to settle.</span>
+          </div>
+          <div>
+            <strong>400</strong>
+            <span>The JSON is missing a required field or calls a model on the wrong route (for example calling a Jev Group Decision model on /v1/chat/completions instead of /v1/decisions).</span>
+          </div>
+          <div>
+            <strong>429</strong>
+            <span>This account already used its requests-per-minute budget. Check <Link to="/docs/rpm">GET /v1/rpm</Link>.</span>
+          </div>
+          <div>
+            <strong>502 / 503</strong>
+            <span>The provider side failed. Retry with backoff; a failed call returns its hold.</span>
+          </div>
+        </div>
+      </Section>
+
+      <Section title="Error body (OpenAI-style)">
+        <CodeBlock
+          language="json"
+          title="Example"
+          code={`{
+  "error": {
+    "message": "Missing API key (Bearer or x-api-key)",
+    "type": "authentication_error",
+    "param": null,
+    "code": null
+  }
+}`}
+        />
       </Section>
     </div>
   )
@@ -497,32 +595,39 @@ export function DevModelsOverviewPage() {
 
   const priceLines = useMemo(() => {
     if (models.length === 0) return []
+    const fmt = (n: number) => (Math.round(n * 1000) % 10 !== 0 ? n.toFixed(3) : n.toFixed(2))
     return models.map((model) => {
-      const free = Number.isFinite(model.weight) && model.weight === 0
+      const free = model.provider === 'Free' || model.id.startsWith('free/') || Number(model.dollarsPer1M) <= 0
       const input = Number(model.inputDollarsPer1M ?? model.dollarsPer1M)
-      const output = Number(model.outputDollarsPer1M ?? model.dollarsPer1M)
+      const isJev = model.provider === 'Jev Group' || /jev-|drex|subq|decision/i.test(model.id)
+      const output = model.outputDollarsPer1M !== undefined ? Number(model.outputDollarsPer1M) : isJev ? 0 : input
       return free
         ? `${model.id.padEnd(28)} free  ${model.provider} · ${model.name}`
-        : `${model.id.padEnd(28)} $${input.toFixed(2)} in / $${(output || input).toFixed(2)} out  ${model.provider} · ${model.name}`
+        : `${model.id.padEnd(28)} $${fmt(input)} in / $${fmt(output)} out  ${model.provider} · ${model.name}`
     })
   }, [models])
 
   const aiPromptExample = useMemo(() => {
     const sample = models.slice(0, 12)
+    const fmt = (n: number) => (Math.round(n * 1000) % 10 !== 0 ? n.toFixed(3) : n.toFixed(2))
     const table =
       sample.length > 0
         ? sample
-            .map((m) =>
-              Number.isFinite(m.weight) && m.weight === 0
+            .map((m) => {
+              const free = m.provider === 'Free' || m.id.startsWith('free/') || Number(m.dollarsPer1M) <= 0
+              const input = Number(m.inputDollarsPer1M ?? m.dollarsPer1M)
+              const isJev = m.provider === 'Jev Group' || /jev-|drex|subq|decision/i.test(m.id)
+              const output = m.outputDollarsPer1M !== undefined ? Number(m.outputDollarsPer1M) : isJev ? 0 : input
+              return free
                 ? `- ${m.id}: free (${m.name})`
-                : `- ${m.id}: $${Number(m.inputDollarsPer1M ?? m.dollarsPer1M).toFixed(2)} input / $${Number(m.outputDollarsPer1M ?? m.dollarsPer1M).toFixed(2)} output per 1M (${m.name})`,
-            )
+                : `- ${m.id}: $${fmt(input)} input / $${fmt(output)} output per 1M (${m.name})`
+            })
             .join('\n')
         : '- (fetch live table from this page or GET /api/public/models)'
     return `You are helping me pick an ${siteName()} model.
 Base URL: ${API_BASE()}
 Auth: Authorization: Bearer sk-…
-Billing: prepaid USD wallet for priced models. Zero-price models draw subscription tokens, not the wallet.
+Billing: prepaid USD wallet for priced models. Zero-price (free/*) models draw subscription tokens, not the wallet.
 
 Current retail prices (live):
 ${table}
@@ -535,7 +640,7 @@ Task: recommend a model for [describe workload], estimate cost for ~N input + M 
       <PageHeader
         eyebrow="Models"
         title="Model APIs"
-        lead="Chat Completions, Responses, and Messages sit on one base URL. The model id in the body decides which family you reach."
+        lead="Chat Completions, Responses, Messages, and Decisions sit on one base URL. The model id in the body decides which family you reach."
       />
 
       <Callout title="Live throughput" tone="info">
@@ -559,17 +664,31 @@ Task: recommend a model for [describe workload], estimate cost for ~N input + M 
             <strong>/v1/messages</strong>
             <span>Claude Code / Anthropic Messages</span>
           </Link>
-          <Link className="ref-tile" to="/docs/models/billing">
-            <em>Guide</em>
-            <strong>Dollar billing</strong>
-            <span>Input, output, and reasoning, charged in USD</span>
+          <Link className="ref-tile" to="/docs/models/decisions">
+            <em>POST</em>
+            <strong>/v1/decisions</strong>
+            <span>Jev Group typed classification, moderation &amp; scoring</span>
           </Link>
           <Link className="ref-tile" to="/docs/models/connect">
             <em>Setup</em>
-            <strong>IDE & SDK</strong>
+            <strong>IDE &amp; SDK</strong>
             <span>Base URL + key wiring for popular clients</span>
           </Link>
         </div>
+      </Section>
+
+      <Section title="How billing works">
+        <p>
+          Priced models bill your USD wallet directly using their published input and output rates per 1M tokens:
+        </p>
+        <CodeBlock
+          code={`cost_usd = (input_tokens / 1_000_000) * input_price_per_1M
+         + (output_tokens / 1_000_000) * output_price_per_1M`}
+        />
+        <p>
+          Free models (<code className="ref-inline">free/*</code>) never charge your USD wallet — they deduct <code className="ref-inline">input_tokens + output_tokens</code> from your active subscription token pool or daily free allowance.
+          Jev Group Decision models (<code className="ref-inline">/v1/decisions</code>) charge only for input tokens (<code className="ref-inline">$0.00</code> output token cost).
+        </p>
       </Section>
 
       <Section title="List models">
@@ -608,30 +727,34 @@ Task: recommend a model for [describe workload], estimate cost for ~N input + M 
                   </tr>
                 </thead>
                 <tbody>
-                  {models.map((model) => (
-                    <tr key={model.id}>
-                      <td>
-                        <code>{model.id}</code>
-                      </td>
-                      <td>{model.provider}</td>
-                      <td>{model.name}</td>
-                      <td>{model.contextWindow || '—'}</td>
-                      <td>
-                        <strong>
-                          {Number.isFinite(model.weight) && model.weight === 0
-                            ? 'free'
-                            : `$${Number(model.inputDollarsPer1M ?? model.dollarsPer1M).toFixed(2)}`}
-                        </strong>
-                      </td>
-                      <td>
-                        <strong>
-                          {Number.isFinite(model.weight) && model.weight === 0
-                            ? 'free'
-                            : `$${Number(model.outputDollarsPer1M ?? model.dollarsPer1M).toFixed(2)}`}
-                        </strong>
-                      </td>
-                    </tr>
-                  ))}
+                  {models.map((model) => {
+                    const isFree = model.provider === 'Free' || model.id.startsWith('free/') || Number(model.dollarsPer1M) <= 0
+                    const isJev = model.provider === 'Jev Group' || /jev-|drex|subq|decision/i.test(model.id)
+                    const inPrice = Number(model.inputDollarsPer1M ?? model.dollarsPer1M) || 0
+                    const outPrice =
+                      model.outputDollarsPer1M !== undefined && (Number(model.outputDollarsPer1M) > 0 || isJev)
+                        ? Number(model.outputDollarsPer1M)
+                        : isJev
+                          ? 0
+                          : inPrice
+                    const fmt = (n: number) => (Math.round(n * 1000) % 10 !== 0 ? n.toFixed(3) : n.toFixed(2))
+                    return (
+                      <tr key={model.id}>
+                        <td>
+                          <code>{model.id}</code>
+                        </td>
+                        <td>{model.provider}</td>
+                        <td>{model.name}</td>
+                        <td>{model.contextWindow || '—'}</td>
+                        <td>
+                          <strong>{isFree ? 'free' : `$${fmt(inPrice)}`}</strong>
+                        </td>
+                        <td>
+                          <strong>{isFree ? 'free' : `$${fmt(outPrice)}`}</strong>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -701,165 +824,296 @@ const chatBodyRows: ParamRow[] = [
   },
 ]
 
-export function DevModelsBillingPage() {
+const decisionTypeSafeRows: ParamRow[] = [
+  {
+    name: 'model',
+    type: 'string',
+    required: true,
+    description: 'Jev Group model ID: jev-1.13, drex-v2.0, subq-snap-preview, gpt-6-luna-decisions, or free/jev-1.13.',
+  },
+  {
+    name: 'state',
+    type: 'string | object | array',
+    required: true,
+    description: 'The text or structured data payload to evaluate.',
+  },
+  {
+    name: 'questions',
+    type: 'Record<string, DecisionQuestion>',
+    required: true,
+    description: 'Named map of typed questions (noul, choice, or score) to evaluate in a single pass.',
+  },
+  {
+    name: 'images',
+    type: 'array<DecisionImage>',
+    description: 'Up to 4 inline base64 images ({ mediaType: "image/png" | "image/jpeg" | "image/webp", base64: "..." }) for vision decision models such as subq-snap-preview and gpt-6-luna-decisions.',
+  },
+]
+
+const decisionOpenAiRows: ParamRow[] = [
+  {
+    name: 'model',
+    type: 'string',
+    required: true,
+    description: 'Jev Group model ID: jev-1.13, drex-v2.0, subq-snap-preview, gpt-6-luna-decisions, or free/jev-1.13.',
+  },
+  {
+    name: 'input',
+    type: 'string | array<Message>',
+    required: true,
+    description: 'Text string or array of user messages containing input_text and input_image blocks.',
+  },
+  {
+    name: 'questions',
+    type: 'array<Question>',
+    required: true,
+    description: 'List of 1 to 100 typed questions using predicate, choice, or score.',
+  },
+]
+
+export function DevModelsDecisionsPage() {
   return (
     <div className="ref-page">
       <PageHeader
-        eyebrow="Models"
-        title="How to lower FREE Token Weight"
-        lead="Paid models charge dollars. Free models never touch the wallet. They draw the free-token allowance at x1."
+        eyebrow="Models · Jev Group"
+        title="Decisions API"
+        lead="Ask specialized Jev Group decision models typed questions about text or images and receive calibrated probabilities, confidence scores, and structured classifications in ~300ms."
       />
+      <EndpointBadge method="POST" path="/v1/decisions" />
 
-      <Section title="The ledger">
+      <Section title="Available Jev Group models">
         <p>
-          A priced model publishes separate <strong>input and output dollar rates per 1M tokens</strong>. That dollar amount leaves the wallet.
-        </p>
-        <CodeBlock
-          code={`cost_usd = input_tokens / 1_000_000 * input_price_per_1M
-         + output_tokens / 1_000_000 * output_price_per_1M`}
-        />
-        <p>
-          A <code className="ref-inline">free/</code> model spends subscription tokens instead, always at x1:
-        </p>
-        <CodeBlock
-          code={`allowance_tokens = ceil((input_tokens + output_tokens) * level_multiplier)`}
-        />
-      </Section>
-
-      <Section id="levels" title="Account levels">
-        <p>
-          Level 1 is granted when the account is created. Every later level has its own fresh top-up goal. A $20 payment does not carry into the $50 goal. Overflow from one payment does: $70 at Level 1 reaches Level 3 with $0 progress.
+          Decision models return calibrated probabilities across your defined answer space in a single non-streaming pass, billing only for input tokens ($0.00 output token cost). Free decision models (<code className="ref-inline">free/jev-1.13</code>) draw from your subscription or daily free allowance and also use <code className="ref-inline">POST /v1/decisions</code>.
         </p>
         <div className="ref-table-wrap">
           <table className="ref-table">
             <thead>
               <tr>
-                <th>Level</th>
-                <th>How you get it</th>
-                <th>FREE Token Weight</th>
+                <th>Model ID</th>
+                <th>Group</th>
+                <th>Name</th>
+                <th>Modalities</th>
+                <th>Context</th>
+                <th>Input / 1M</th>
+                <th>Output / 1M</th>
               </tr>
             </thead>
             <tbody>
-              <tr><td><strong>1</strong></td><td>Signup</td><td>x3</td></tr>
-              <tr><td><strong>2</strong></td><td>Fresh $20 after Level 1</td><td>x2.5</td></tr>
-              <tr><td><strong>3</strong></td><td>Fresh $50 after Level 2</td><td>x2</td></tr>
-              <tr><td><strong>4</strong></td><td>Fresh $100 after Level 3</td><td>x1.5</td></tr>
-              <tr><td><strong>5</strong></td><td>Fresh $200 after Level 4</td><td>x1</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <p>
-          Reaching Level 5 takes $370 in counted purchases: $20 + $50 + $100 + $200. At x1, 50,000 input tokens plus 1,000 output tokens spend 51,000 subscription tokens. At x3 the same call spends 153,000. The wallet stays at $0 either way.
-        </p>
-      </Section>
-
-      <Section title="Purchases that count">
-        <div className="ref-table-wrap">
-          <table className="ref-table">
-            <thead>
               <tr>
-                <th>Purchase</th>
-                <th>Counts toward the next level</th>
+                <td><code>free/jev-1.13</code></td>
+                <td>Free</td>
+                <td>Jev 1.13</td>
+                <td>Text → Decision</td>
+                <td>64K</td>
+                <td><strong>free</strong></td>
+                <td><strong>free</strong></td>
               </tr>
-            </thead>
-            <tbody>
-              <tr><td>Balance top-up</td><td>Yes. Card and crypto. The credited amount, not a card fee.</td></tr>
-              <tr><td>Subscriptions</td><td>Yes. Card, crypto, or paid from the wallet.</td></tr>
-              <tr><td>RPM plan</td><td>Yes. Card, crypto, or paid from the wallet.</td></tr>
-              <tr><td>Several invoices</td><td>Yes. $7 then $13 clears a $20 goal.</td></tr>
-              <tr><td>Spending the credited balance</td><td>Not required. The payment itself counts.</td></tr>
-              <tr><td>Promo, referral, Telegram bonus</td><td>No. Those are not purchases.</td></tr>
+              <tr>
+                <td><code>drex-v2.0</code></td>
+                <td>Jev Group</td>
+                <td>Drex 2.0</td>
+                <td>Text → Decision</td>
+                <td>131K</td>
+                <td><strong>$0.040</strong></td>
+                <td><strong>$0.00</strong></td>
+              </tr>
+              <tr>
+                <td><code>jev-1.13</code></td>
+                <td>Jev Group</td>
+                <td>Jev 1.13</td>
+                <td>Text → Decision</td>
+                <td>64K</td>
+                <td><strong>$0.042</strong></td>
+                <td><strong>$0.00</strong></td>
+              </tr>
+              <tr>
+                <td><code>subq-snap-preview</code></td>
+                <td>Jev Group</td>
+                <td>SubQ Snap (Preview)</td>
+                <td>Text + Vision → Decision</td>
+                <td>313K</td>
+                <td><strong>$0.050</strong></td>
+                <td><strong>$0.00</strong></td>
+              </tr>
+              <tr>
+                <td><code>gpt-6-luna-decisions</code></td>
+                <td>Jev Group</td>
+                <td>GPT-6 Luna (Decisions)</td>
+                <td>Text + Vision → Decision</td>
+                <td>1M</td>
+                <td><strong>$0.100</strong></td>
+                <td><strong>$0.00</strong></td>
+              </tr>
             </tbody>
           </table>
         </div>
-        <Callout title="Where to watch it" tone="info">
+        <Callout title="Dedicated endpoint" tone="info">
           <p>
-            Signed-in accounts show the level in the top bar. Open it for the ladder, the dollars left to the next level, and the purchase list. Live goals are also on <code className="ref-inline">GET /api/public/levels</code>.
+            Decision models only accept <code className="ref-inline">POST /v1/decisions</code>. Calling a decision model on <code className="ref-inline">/v1/chat/completions</code>, <code className="ref-inline">/v1/responses</code>, or <code className="ref-inline">/v1/messages</code> returns a <code className="ref-inline">400 invalid_request_error</code>.
           </p>
         </Callout>
       </Section>
 
-      <Section title="How token types are counted">
-        <div className="ref-table-wrap">
-          <table className="ref-table">
-            <thead>
-              <tr>
-                <th>Type</th>
-                <th>What it includes</th>
-                <th>Reported as</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><strong>Input</strong></td>
-                <td>Prompt messages, system instructions, and tool definitions.</td>
-                <td><code>prompt_tokens</code> or <code>input_tokens</code></td>
-              </tr>
-              <tr>
-                <td><strong>Output</strong></td>
-                <td>Generated text, assistant content, and tool calls.</td>
-                <td><code>completion_tokens</code> or <code>output_tokens</code></td>
-              </tr>
-              <tr>
-                <td><strong>Reasoning</strong></td>
-                <td>Chain-of-thought tokens. They are already inside output and billed as output.</td>
-                <td><code>completion_tokens_details.reasoning_tokens</code></td>
-              </tr>
-              <tr>
-                <td><strong>Rates</strong></td>
-                <td>Input and output have separate catalog rates. Cache counters are not billed and are not returned.</td>
-                <td><code>$ / 1M</code> input and output</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </Section>
-
-      <Section title="Standard Usage Response Example">
+      <Section title="Shape 1: TypeSafe / SubQ format (state + questions map)">
         <p>
-          OpenAI SDK, LangChain, Claude Code, Cursor, and curl all get the same usage counts. Those counts are model tokens, not a wallet denomination:
+          Pass content in <code className="ref-inline">state</code> and a dictionary of named questions in <code className="ref-inline">questions</code>. Supported question types:
         </p>
+        <ul>
+          <li><strong>noul</strong> — Binary yes/no predicate returning a probability from 0.0 to 1.0.</li>
+          <li><strong>choice</strong> — Multi-class selection requiring a <code className="ref-inline">criteria</code> object mapping each option key to its description.</li>
+          <li><strong>score</strong> — Ordered grading scale requiring a <code className="ref-inline">criteria</code> array of at least 2 ordered level labels.</li>
+        </ul>
+        <ParamTable rows={decisionTypeSafeRows} />
         <CodeBlock
-          code={`{
-  "id": "chatcmpl-...",
-  "object": "chat.completion",
-  "model": "free/glm-5.3-flash",
-  "choices": [...],
-  "usage": {
-    "prompt_tokens": 1200,
-    "completion_tokens": 450,
-    "total_tokens": 1650,
-    "completion_tokens_details": {
-      "reasoning_tokens": 150
+          title="TypeSafe / SubQ shape request"
+          code={`curl ${API_BASE()}/decisions \\
+  -H "${AUTH_HEADER}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "jev-1.13",
+    "state": "User asked: Can you help me write a Python script to backup my PostgreSQL database every night using cron?",
+    "questions": {
+      "is_safe": {
+        "type": "noul",
+        "instructions": "Is this user request safe and benign to fulfill?"
+      },
+      "category": {
+        "type": "choice",
+        "instructions": "Which domain best describes this request?",
+        "criteria": {
+          "coding": "Software development, scripting, or DevOps",
+          "creative": "Creative writing or storytelling",
+          "math": "Mathematics or formal logic"
+        }
+      },
+      "complexity": {
+        "type": "score",
+        "instructions": "How complex is the task requested?",
+        "criteria": ["trivial", "easy", "moderate", "hard", "expert"]
+      }
     }
+  }'`}
+        />
+        <CodeBlock
+          title="Response (200 OK)"
+          language="json"
+          code={`{
+  "object": "decision",
+  "model": "jev-1.13",
+  "answers": {
+    "is_safe": {
+      "type": "noul",
+      "noul": 0.98
+    },
+    "category": {
+      "type": "choice",
+      "choice": "coding",
+      "confidence": 1.0,
+      "probabilities": {
+        "coding": 1.0,
+        "creative": 0.0,
+        "math": 0.0
+      }
+    },
+    "complexity": {
+      "type": "score",
+      "score": 1.38,
+      "confidence": 0.68,
+      "legend": {
+        "0": "trivial",
+        "1": "easy",
+        "2": "moderate",
+        "3": "hard",
+        "4": "expert"
+      },
+      "probabilities": {
+        "0": 0.0,
+        "1": 0.62,
+        "2": 0.38,
+        "3": 0.0,
+        "4": 0.0
+      }
+    }
+  },
+  "usage": {
+    "prompt_tokens": 436,
+    "completion_tokens": 71,
+    "total_tokens": 507
   }
 }`}
         />
+      </Section>
+
+      <Section title="Shape 2: OpenAI Decisions SDK format (input + questions list)">
         <p>
-          With <code className="ref-inline">free/glm-5.3-flash</code> the wallet is not charged. At Level 1 the same usage spends subscription tokens at x3:
+          Compatible with <code className="ref-inline">client.decisions.create</code> in OpenAI-style SDKs. Pass <code className="ref-inline">input</code> and an array of <code className="ref-inline">questions</code> (<code className="ref-inline">predicate</code>, <code className="ref-inline">choice</code>, or <code className="ref-inline">score</code>).
         </p>
+        <ParamTable rows={decisionOpenAiRows} />
         <CodeBlock
-          code={`raw_tokens = 1,200 + 450 = 1,650
-allowance_tokens = ceil(1,650 * 3) = 4,950
-wallet_charge = $0.00`}
+          title="OpenAI Decisions shape request"
+          code={`curl ${API_BASE()}/decisions \\
+  -H "${AUTH_HEADER}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "subq-snap-preview",
+    "input": "I was charged twice for my subscription this month and I need an immediate refund!",
+    "questions": [
+      {
+        "type": "predicate",
+        "name": "urgent_billing_issue",
+        "instructions": "Does the message report a duplicate charge or billing error requiring refund?"
+      },
+      {
+        "type": "choice",
+        "name": "sentiment",
+        "instructions": "What is the customer sentiment?",
+        "choices": [
+          { "value": "positive", "description": "Happy or satisfied" },
+          { "value": "neutral", "description": "Matter-of-fact inquiry" },
+          { "value": "frustrated", "description": "Upset or demanding urgent resolution" }
+        ]
+      },
+      {
+        "type": "score",
+        "name": "urgency",
+        "instructions": "Rate the urgency of this ticket",
+        "levels": [
+          { "label": "low", "description": "Low urgency" },
+          { "label": "medium", "description": "Medium urgency" },
+          { "label": "high", "description": "High urgency" }
+        ]
+      }
+    ]
+  }'`}
         />
       </Section>
 
-      <Section title="Parallel calls cannot double-spend">
-        <ol className="ref-steps">
-          <li>
-            <strong>Lock first.</strong> The gateway estimates input plus the requested output ceiling and holds that amount before the provider sees the call.
-          </li>
-          <li>
-            <strong>Settle to usage.</strong> On success the real dollar cost stays debited and the unused lock returns at once.
-          </li>
-          <li>
-            <strong>Give it back on failure.</strong> An abort or an upstream error returns the entire hold. A hold that never finishes expires after 15 minutes.
-          </li>
-        </ol>
+      <Section title="Vision decisions (SubQ Snap & GPT-6 Luna)">
         <p>
-          Read the live wallet and the subscription remainder together with <code className="ref-inline">GET /v1/balance</code>.
+          Attach up to 4 inline base64 images (<code className="ref-inline">image/png</code>, <code className="ref-inline">image/jpeg</code>, or <code className="ref-inline">image/webp</code>) to classify screenshots, receipts, UI states, or moderation targets.
         </p>
+        <CodeBlock
+          title="Image + state decision example"
+          code={`curl ${API_BASE()}/decisions \\
+  -H "${AUTH_HEADER}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "subq-snap-preview",
+    "state": "Verify this user-uploaded image before publishing.",
+    "images": [
+      {
+        "mediaType": "image/png",
+        "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+      }
+    ],
+    "questions": {
+      "is_safe_for_work": {
+        "type": "noul",
+        "instructions": "Is the attached image safe for work?"
+      }
+    }
+  }'`}
+        />
       </Section>
     </div>
   )

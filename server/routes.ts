@@ -29,6 +29,7 @@ import {
   familyFromUpstreamId,
   fetchCatalogModels,
   importApinexCatalogModels,
+  isDecisionCatalogModelId,
   listProviderKeys,
   MODEL_CATEGORIES,
   pickProviderSecrets,
@@ -103,7 +104,10 @@ function catalogPrices(row: { provider: string; id: string; input_price_micros: 
   if (free) return { dollarsPer1M: 0, inputDollarsPer1M: 0, outputDollarsPer1M: 0 }
   const input = Math.max(0, Number(row.input_price_micros) || 0) / 1_000_000
   const storedOutput = Math.max(0, Number(row.output_price_micros) || 0) / 1_000_000
-  const output = storedOutput > 0 ? storedOutput : input
+  const isJev =
+    normalizeProviderName(row.provider) === 'Jev Group' ||
+    isDecisionCatalogModelId(row.id)
+  const output = storedOutput > 0 ? storedOutput : isJev ? 0 : input
   return { dollarsPer1M: input, inputDollarsPer1M: input, outputDollarsPer1M: output }
 }
 import { getAdminPromoEvent, getPublicPromoEvent, grantPromoAccess, liveDiscountMap, noteQualifyingTopup, saveAdminPromoEvent } from './promoEvents.js'
@@ -2652,14 +2656,17 @@ export async function registerRoutes(app: FastifyInstance) {
     if (existing) return reply.code(409).send({ error: 'Model already exists' })
     const createdAt = nowIso()
     const isFree = provider.trim().toLowerCase() === 'free' || modelId.startsWith('free/')
+    const isJev = !isFree && (normalizeProviderName(provider) === 'Jev Group' || isDecisionCatalogModelId(modelId) || isDecisionCatalogModelId(upstreamId))
     const inputMicros = isFree ? 0 : Math.round(inputPrice * 1_000_000)
-    const outputMicros = isFree ? 0 : Math.round((outputPrice > 0 ? outputPrice : inputPrice) * 1_000_000)
-    const weight = isFree ? (tokenWeight > 0 ? tokenWeight : 3) : (inputMicros > 0 ? 0 : (tokenWeight > 0 ? tokenWeight : 1))
+    const outputMicros = isFree ? 0 : Math.round((outputPrice > 0 ? outputPrice : isJev ? 0 : inputPrice) * 1_000_000)
+    const weight = isFree ? (tokenWeight > 0 ? tokenWeight : 1) : (inputMicros > 0 ? 0 : (tokenWeight > 0 ? tokenWeight : 1))
     const storedProvider = isFree
       ? 'Free'
-      : inputMicros > 0
-        ? (familyFromUpstreamId(upstreamId) ?? provider)
-        : providerForTokenWeight(weight, upstreamId, provider)
+      : isJev
+        ? 'Jev Group'
+        : inputMicros > 0
+          ? (familyFromUpstreamId(upstreamId) ?? provider)
+          : providerForTokenWeight(weight, upstreamId, provider)
     const nextOrder =
       (
         db.prepare(`SELECT COALESCE(MAX(sort_order), 0) + 10 AS n FROM model_catalog`).get() as {
@@ -2729,9 +2736,10 @@ export async function registerRoutes(app: FastifyInstance) {
     }
     const shared = request.body.dollarsPer1M
     const inputPrice = Number(request.body.inputDollarsPer1M ?? shared)
-    const outputPrice = Number(request.body.outputDollarsPer1M ?? shared)
-    if (!Number.isFinite(inputPrice) || inputPrice < 0.01 || !Number.isFinite(outputPrice) || outputPrice < 0.01) {
-      return reply.code(400).send({ error: 'Input and output prices must each be at least $0.01 per 1M tokens' })
+    const isJev = normalizeProviderName(current.provider) === 'Jev Group' || isDecisionCatalogModelId(modelId) || isDecisionCatalogModelId(current.upstream_id)
+    const outputPrice = Number(request.body.outputDollarsPer1M ?? (isJev ? 0 : shared))
+    if (!Number.isFinite(inputPrice) || inputPrice < 0.01 || !Number.isFinite(outputPrice) || outputPrice < (isJev ? 0 : 0.01)) {
+      return reply.code(400).send({ error: 'Input price must be at least $0.01 per 1M tokens' })
     }
     const inputMicros = Math.round(inputPrice * 1_000_000)
     const outputMicros = Math.round(outputPrice * 1_000_000)

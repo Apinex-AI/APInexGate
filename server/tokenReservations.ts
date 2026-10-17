@@ -66,6 +66,8 @@ export function estimateModelReservationTokens(
   const inputChars =
     textCharCount(body.messages) +
     textCharCount(body.input) +
+    textCharCount(body.state) +
+    (body.questions ? JSON.stringify(body.questions).length : 0) +
     textCharCount(body.prompt) +
     textCharCount(body.system)
   const inputTokens = Math.max(charsToTokens(Math.max(inputChars, 16)), MIN_INPUT_RESERVE_TOKENS)

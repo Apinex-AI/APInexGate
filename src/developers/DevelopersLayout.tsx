@@ -22,18 +22,20 @@ const NAV: NavGroup[] = [
     items: [
       { to: '/docs', label: 'Overview', end: true },
       { to: '/docs/auth', label: 'Authentication' },
-      { to: '/docs/errors', label: 'Errors & limits' },
       { to: '/docs/balance', label: 'Balance' },
+      { to: '/docs/subscription', label: 'Subscription' },
+      { to: '/docs/rpm', label: 'RPM' },
+      { to: '/docs/errors', label: 'Errors' },
     ],
   },
   {
     title: 'Models',
     items: [
       { to: '/docs/models', label: 'Catalog', end: true },
-      { to: '/docs/models/billing', label: 'Token weight' },
       { to: '/docs/models/chat', label: 'Chat' },
       { to: '/docs/models/responses', label: 'Responses' },
       { to: '/docs/models/messages', label: 'Messages' },
+      { to: '/docs/models/decisions', label: 'Decisions' },
       { to: '/docs/models/connect', label: 'Connect' },
     ],
   },

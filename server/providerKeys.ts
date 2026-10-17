@@ -19,11 +19,25 @@ export const MODEL_CATEGORIES = [
   'DeepSeek',
   'GLM',
   'Grok',
+  'Tencent',
+  'Muse',
+  'Jev Group',
 ] as const
 export type ModelCategory = (typeof MODEL_CATEGORIES)[number]
 
 export const FAMILY_CATEGORIES = MODEL_CATEGORIES.filter((name) => name !== 'Free')
 export type FamilyCategory = (typeof FAMILY_CATEGORIES)[number]
+
+export function isDecisionCatalogModelId(modelId: string | null | undefined): boolean {
+  const lower = String(modelId ?? '').trim().toLowerCase()
+  return (
+    lower.includes('jev') ||
+    lower.includes('drex') ||
+    lower.includes('subq') ||
+    lower.includes('typesafe') ||
+    lower.includes('decision')
+  )
+}
 
 export function isSupportedGptModel(modelId: string) {
   const normalized = modelId.trim().toLowerCase()
@@ -54,18 +68,29 @@ export function isSupportedGeminiModel(modelId: string) {
 
 export const CATEGORY_MATCHERS: Record<ModelCategory, (modelId: string) => boolean> = {
   Free: () => false,
+  'Jev Group': (modelId) => isDecisionCatalogModelId(modelId),
   Gemini: (modelId) => modelId.includes('gemini') || modelId.includes('google-antigravity') || modelId.includes('agy-'),
   Kimi: (modelId) => modelId.includes('kimi'),
-  GPT: (modelId) => modelId.includes('openai') || modelId.includes('gpt') || modelId.includes('codex'),
+  GPT: (modelId) =>
+    !isDecisionCatalogModelId(modelId) &&
+    (modelId.includes('openai') || modelId.includes('gpt') || modelId.includes('codex')),
   Claude: (modelId) => modelId.includes('anthropic') || modelId.includes('claude'),
   DeepSeek: (modelId) => modelId.includes('deepseek'),
   GLM: (modelId) => modelId.includes('glm') || modelId.includes('zhipu'),
   Grok: (modelId) => modelId.includes('grok') || modelId.includes('xai'),
+  Tencent: (modelId) =>
+    modelId.startsWith('tencent/') ||
+    modelId.includes('tencent') ||
+    modelId.includes('hunyuan') ||
+    modelId === 'hy4' ||
+    modelId.startsWith('hy4-'),
+  Muse: (modelId) => modelId.includes('muse'),
 }
 
 export function familyFromUpstreamId(upstreamId: string | null | undefined): FamilyCategory | null {
   const raw = String(upstreamId ?? '').trim().toLowerCase()
   if (!raw) return null
+  if (CATEGORY_MATCHERS['Jev Group'](raw)) return 'Jev Group'
   for (const family of FAMILY_CATEGORIES) {
     if (CATEGORY_MATCHERS[family](raw)) return family
   }
@@ -78,6 +103,10 @@ export function providerForTokenWeight(
   currentProvider?: string | null,
 ) {
   if (isFreeWeight(tokenWeight)) return 'Free'
+  const currentNorm = currentProvider?.trim().toLowerCase() ?? ''
+  if (currentNorm === 'jev group' || currentNorm === 'jev' || currentNorm === 'decisions') {
+    return 'Jev Group'
+  }
   return familyFromUpstreamId(upstreamId) ?? currentProvider?.trim() ?? 'GPT'
 }
 
@@ -603,6 +632,7 @@ type ApinexCatalogSpec = {
   provider: ModelCategory
   contextWindow: string
   dollarsPer1M: number
+  outputDollarsPer1M?: number
   tokenWeight: number
 }
 
@@ -615,6 +645,7 @@ export const APINEX_CATALOG_DEFAULTS: Record<string, ApinexCatalogSpec> = {
   'deepseek-v4.1-flash': { name: 'Deepseek V4.1 Flash', provider: 'DeepSeek', contextWindow: '1M', dollarsPer1M: 0.06, tokenWeight: 0 },
   'deepseek-v4-flash': { name: 'Deepseek V4 Flash', provider: 'DeepSeek', contextWindow: '1M', dollarsPer1M: 0.05, tokenWeight: 0 },
   'deepseek-v4-pro': { name: 'Deepseek V4 Pro', provider: 'DeepSeek', contextWindow: '1M', dollarsPer1M: 0.07, tokenWeight: 0 },
+  'gemini-4-argon': { name: 'Gemini 4 Argon', provider: 'Gemini', contextWindow: '1M', dollarsPer1M: 0.6, tokenWeight: 0 },
   'gemini-3.8-flash': { name: 'Gemini 3.8 Flash', provider: 'Gemini', contextWindow: '1M', dollarsPer1M: 0.1, tokenWeight: 0 },
   'gemini-3.1-pro': { name: 'Gemini 3.1 Pro', provider: 'Gemini', contextWindow: '1M', dollarsPer1M: 0.15, tokenWeight: 0 },
   'gpt-6.1-sol': { name: 'Gpt 6.1 Sol', provider: 'GPT', contextWindow: '1M', dollarsPer1M: 0.3, tokenWeight: 0 },
@@ -625,24 +656,32 @@ export const APINEX_CATALOG_DEFAULTS: Record<string, ApinexCatalogSpec> = {
   'glm-5.3-flash': { name: 'GLM-5.3 Flash', provider: 'GLM', contextWindow: '1M', dollarsPer1M: 0.05, tokenWeight: 0 },
   'glm-5.3': { name: 'GLM 5.3', provider: 'GLM', contextWindow: '1M', dollarsPer1M: 0.15, tokenWeight: 0 },
   'kimi-k3': { name: 'Kimi K3', provider: 'Kimi', contextWindow: '1M', dollarsPer1M: 0.3, tokenWeight: 0 },
-  'free/gemini-3.8-flash': { name: 'Gemini 3.8 Flash', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 3 },
-  'free/qwen-3.8-max': { name: 'Qwen 3.8 MAX', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 3 },
-  'free/deepseek-v4.1-flash': { name: 'Deepseek V4.1 Flash', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 3 },
-  'free/deepseek-v4-flash-0731': { name: 'Deepseek V4 Flash', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 3 },
-  'free/deepseek-v4-pro-0813': { name: 'Deepseek V4 Pro', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 3 },
-  'free/gpt-6-luna': { name: 'Gpt 6 Luna', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 3 },
-  'free/glm-5.3-flash': { name: 'GLM-5.3 Flash', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 3 },
-  'free/mimo-v2.6-pro': { name: 'Mimo V2.6 Pro', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 2 },
-  'free/minimax-m3.1': { name: 'MiniMax M3.1', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 2 },
-  'free/minimax-m3': { name: 'MiniMax M3', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 2 },
-  'free/mimo-v2.6-flash': { name: 'Mimo V2.6 Flash', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 2 },
-  'free/claude-sonnet-4.6': { name: 'Claude 4.6 Sonnet', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 3 },
-  'free/hy4': { name: 'HY 4', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 2 },
-  'free/kimi-k3': { name: 'Kimi K3', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 3 },
-  'free/claude-opus-4.6': { name: 'Claude 4.6 Opus', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 3 },
-  'free/muse-spark-1.3': { name: 'Muse Spark 1.3', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 3 },
-  'free/gemini-3.1-pro': { name: 'Gemini 3.1 Pro', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 2 },
-  'free/kimi-k2.8': { name: 'Kimi K2.8', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 2 },
+  'muse-spark-1.3': { name: 'Muse Spark 1.3', provider: 'Muse', contextWindow: '1M', dollarsPer1M: 0.3, tokenWeight: 0 },
+  'hy4-preview': { name: 'Hy4 Preview', provider: 'Tencent', contextWindow: '1M', dollarsPer1M: 0.3, tokenWeight: 0 },
+  'drex-v2.0': { name: 'Drex 2.0', provider: 'Jev Group', contextWindow: '131K', dollarsPer1M: 0.04, outputDollarsPer1M: 0, tokenWeight: 0 },
+  'jev-1.13': { name: 'Jev 1.13', provider: 'Jev Group', contextWindow: '64K', dollarsPer1M: 0.042, outputDollarsPer1M: 0, tokenWeight: 0 },
+  'subq-snap-preview': { name: 'SubQ Snap (Preview)', provider: 'Jev Group', contextWindow: '313K', dollarsPer1M: 0.05, outputDollarsPer1M: 0, tokenWeight: 0 },
+  'gpt-6-luna-decisions': { name: 'GPT-6 Luna (Decisions)', provider: 'Jev Group', contextWindow: '1M', dollarsPer1M: 0.1, outputDollarsPer1M: 0, tokenWeight: 0 },
+  'free/jev-1.13': { name: 'Jev 1.13', provider: 'Free', contextWindow: '64K', dollarsPer1M: 0, outputDollarsPer1M: 0, tokenWeight: 1 },
+  'free/glm-5.3': { name: 'GLM 5.3', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
+  'free/gemini-3.8-flash': { name: 'Gemini 3.8 Flash', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
+  'free/qwen-3.8-max': { name: 'Qwen 3.8 MAX', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
+  'free/deepseek-v4.1-flash': { name: 'Deepseek V4.1 Flash', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
+  'free/deepseek-v4-flash-0731': { name: 'Deepseek V4 Flash', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
+  'free/deepseek-v4-pro-0813': { name: 'Deepseek V4 Pro', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
+  'free/gpt-6-luna': { name: 'Gpt 6 Luna', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
+  'free/glm-5.3-flash': { name: 'GLM-5.3 Flash', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
+  'free/mimo-v2.6-pro': { name: 'Mimo V2.6 Pro', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
+  'free/minimax-m3.1': { name: 'MiniMax M3.1', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
+  'free/minimax-m3': { name: 'MiniMax M3', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
+  'free/mimo-v2.6-flash': { name: 'Mimo V2.6 Flash', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
+  'free/claude-sonnet-4.6': { name: 'Claude 4.6 Sonnet', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
+  'free/hy4': { name: 'HY 4', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
+  'free/kimi-k3': { name: 'Kimi K3', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
+  'free/claude-opus-4.6': { name: 'Claude 4.6 Opus', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
+  'free/muse-spark-1.3': { name: 'Muse Spark 1.3', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
+  'free/gemini-3.1-pro': { name: 'Gemini 3.1 Pro', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
+  'free/kimi-k2.8': { name: 'Kimi K2.8', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
 }
 
 export function displayNameFromId(modelId: string) {
@@ -673,6 +712,7 @@ async function fetchApinexPublicMetadata(proxyIndex: number | null = null): Prom
         contextWindow?: unknown
         weight?: unknown
         dollarsPer1M?: unknown
+        outputDollarsPer1M?: unknown
       }>
     }
     for (const item of payload.models ?? []) {
@@ -682,17 +722,34 @@ async function fetchApinexPublicMetadata(proxyIndex: number | null = null): Prom
       const rawProvider = String(item.provider ?? '').trim()
       const provider: ModelCategory = isFree
         ? 'Free'
-        : (MODEL_CATEGORIES.find((c) => c.toLowerCase() === rawProvider.toLowerCase()) ??
-           familyFromUpstreamId(modelId) ??
-           'GPT')
+        : isDecisionCatalogModelId(modelId) || rawProvider.toLowerCase() === 'jev group' || rawProvider.toLowerCase() === 'jev'
+          ? 'Jev Group'
+          : (MODEL_CATEGORIES.find((c) => c.toLowerCase() === rawProvider.toLowerCase()) ??
+             familyFromUpstreamId(modelId) ??
+             'GPT')
       const dollars = Number(item.dollarsPer1M)
+      const outDollars = item.outputDollarsPer1M !== undefined ? Number(item.outputDollarsPer1M) : undefined
       const weight = Number(item.weight)
+      const isJev = provider === 'Jev Group' || isDecisionCatalogModelId(modelId)
+      const resolvedInput = isFree
+        ? 0
+        : Number.isFinite(dollars) && dollars > 0
+          ? dollars
+          : (map.get(modelId)?.dollarsPer1M ?? 0.1)
+      const resolvedOutput = isFree
+        ? 0
+        : outDollars !== undefined && Number.isFinite(outDollars) && outDollars >= 0
+          ? outDollars
+          : isJev
+            ? 0
+            : resolvedInput
       map.set(modelId, {
         name: String(item.name ?? '').trim() || displayNameFromId(modelId),
         provider,
         contextWindow: String(item.contextWindow ?? '').trim() || '1M',
-        dollarsPer1M: isFree ? 0 : Number.isFinite(dollars) && dollars > 0 ? dollars : (map.get(modelId)?.dollarsPer1M ?? 0.1),
-        tokenWeight: isFree ? (Number.isFinite(weight) && weight > 0 ? weight : (map.get(modelId)?.tokenWeight ?? 3)) : 0,
+        dollarsPer1M: resolvedInput,
+        outputDollarsPer1M: resolvedOutput,
+        tokenWeight: isFree ? (Number.isFinite(weight) && weight > 0 ? weight : (map.get(modelId)?.tokenWeight ?? 1)) : 0,
       })
     }
   } catch {
@@ -757,17 +814,21 @@ export async function fetchCatalogModels(
         seen.add(modelId)
         const spec = publicMeta.get(modelId)
         const isFree = modelId.startsWith('free/') || spec?.provider === 'Free'
-        const resolvedProvider: ModelCategory =
-          spec?.provider ?? (isFree ? 'Free' : (familyFromUpstreamId(modelId) ?? 'GPT'))
+        const resolvedProvider: ModelCategory = isFree
+          ? 'Free'
+          : isDecisionCatalogModelId(modelId) || spec?.provider === 'Jev Group'
+            ? 'Jev Group'
+            : (spec?.provider ?? familyFromUpstreamId(modelId) ?? 'GPT')
         const price = spec?.dollarsPer1M ?? (isFree ? 0 : 0.1)
+        const outPrice = spec?.outputDollarsPer1M !== undefined ? spec.outputDollarsPer1M : (resolvedProvider === 'Jev Group' ? 0 : price)
         models.push({
           id: modelId,
           name: String(item.name ?? '').trim() || spec?.name || displayNameFromId(modelId),
           provider: resolvedProvider,
           contextWindow: item.context_window ? String(item.context_window) : (spec?.contextWindow ?? '1M'),
           inputPrice: price,
-          outputPrice: price,
-          tokenWeight: isFree ? (spec?.tokenWeight ?? 3) : 0,
+          outputPrice: outPrice,
+          tokenWeight: isFree ? (spec?.tokenWeight ?? 1) : 0,
         })
       }
       for (const [modelId, spec] of publicMeta.entries()) {
@@ -779,7 +840,7 @@ export async function fetchCatalogModels(
           provider: spec.provider,
           contextWindow: spec.contextWindow,
           inputPrice: spec.dollarsPer1M,
-          outputPrice: spec.dollarsPer1M,
+          outputPrice: spec.outputDollarsPer1M ?? (spec.provider === 'Jev Group' ? 0 : spec.dollarsPer1M),
           tokenWeight: spec.tokenWeight,
         })
       }
@@ -837,19 +898,25 @@ export async function importApinexCatalogModels(): Promise<{
   const tx = db.transaction((items: CatalogModel[]) => {
     for (const item of items) {
       const isFree = item.provider === 'Free' || item.id.startsWith('free/')
-      const storedProvider = isFree ? 'Free' : item.provider
+      const isJev = !isFree && (item.provider === 'Jev Group' || isDecisionCatalogModelId(item.id))
+      const storedProvider = isFree ? 'Free' : isJev ? 'Jev Group' : item.provider
       const inputMicros = isFree ? 0 : Math.round((item.inputPrice || 0.1) * 1_000_000)
-      const outputMicros = isFree ? 0 : Math.round((item.outputPrice || item.inputPrice || 0.1) * 1_000_000)
-      const tokenWeight = isFree ? (item.tokenWeight && item.tokenWeight > 0 ? item.tokenWeight : 3) : 0
+      const outputMicros = isFree
+        ? 0
+        : isJev && item.outputPrice === 0
+          ? 0
+          : Math.round((item.outputPrice || item.inputPrice || 0.1) * 1_000_000)
+      const tokenWeight = isFree ? (item.tokenWeight && item.tokenWeight > 0 ? item.tokenWeight : 1) : 0
       const contextWindow = item.contextWindow && item.contextWindow !== '—' ? item.contextWindow : '1M'
 
       const existing = db
         .prepare(
-          'SELECT id, context_window, input_price_micros, output_price_micros, token_weight FROM model_catalog WHERE id = ?',
+          'SELECT id, provider, context_window, input_price_micros, output_price_micros, token_weight FROM model_catalog WHERE id = ?',
         )
         .get(item.id) as
         | {
             id: string
+            provider: string
             context_window: string
             input_price_micros: number
             output_price_micros: number
@@ -881,6 +948,7 @@ export async function importApinexCatalogModels(): Promise<{
         imported += 1
       } else {
         const needsUpdate =
+          existing.provider !== storedProvider ||
           existing.context_window === '—' ||
           (isFree && existing.token_weight !== tokenWeight) ||
           (!isFree && existing.input_price_micros === 0)

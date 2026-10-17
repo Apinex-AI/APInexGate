@@ -40,12 +40,14 @@ import {
   DevBalancePage,
   DevErrorsPage,
   DevModelsChatPage,
-  DevModelsBillingPage,
   DevModelsConnectPage,
+  DevModelsDecisionsPage,
   DevModelsMessagesPage,
   DevModelsOverviewPage,
   DevModelsResponsesPage,
   DevOverviewPage,
+  DevRpmPage,
+  DevSubscriptionPage,
 } from './developers/pages'
 import { isAdminConsoleHost } from '../shared/adminHosts'
 
@@ -139,13 +141,15 @@ function developerChildRoutes() {
     <>
       <Route index element={<DevOverviewPage />} />
       <Route path="auth" element={<DevAuthPage />} />
-      <Route path="errors" element={<DevErrorsPage />} />
       <Route path="balance" element={<DevBalancePage />} />
+      <Route path="subscription" element={<DevSubscriptionPage />} />
+      <Route path="rpm" element={<DevRpmPage />} />
+      <Route path="errors" element={<DevErrorsPage />} />
       <Route path="models" element={<DevModelsOverviewPage />} />
-      <Route path="models/billing" element={<DevModelsBillingPage />} />
       <Route path="models/chat" element={<DevModelsChatPage />} />
       <Route path="models/responses" element={<DevModelsResponsesPage />} />
       <Route path="models/messages" element={<DevModelsMessagesPage />} />
+      <Route path="models/decisions" element={<DevModelsDecisionsPage />} />
       <Route path="models/connect" element={<DevModelsConnectPage />} />
       <Route path="*" element={<DeveloperSectionHome />} />
     </>

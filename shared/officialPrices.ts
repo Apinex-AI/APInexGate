@@ -45,6 +45,10 @@ export const OFFICIAL_TOKEN_PRICES: Record<string, OfficialTokenPrice> = {
   'hy4': { inputPer1M: 0.834, outputPer1M: 2.501 },
   'qwen-3.8-max': { inputPer1M: 1.65, outputPer1M: 4.951 },
   'muse-spark-1.3': { inputPer1M: 1.25, outputPer1M: 4.25 },
+  'jev-1.13': { inputPer1M: 0.42, outputPer1M: 0.42 },
+  'drex-v2.0': { inputPer1M: 0.4, outputPer1M: 0.4 },
+  'subq-snap-preview': { inputPer1M: 0.5, outputPer1M: 0.5 },
+  'gpt-6-luna-decisions': { inputPer1M: 0.5, outputPer1M: 0.5 },
 }
 
 const OFFICIAL_PRICE_ALIASES: Record<string, string> = {
