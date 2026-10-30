@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import Database from 'better-sqlite3'
 import { parseSafeInt } from '../server/db.js'
-import { requestHostname } from '../shared/adminHosts.js'
+import { isAdminConsoleHost, requestHostname } from '../shared/adminHosts.js'
 import { tryReserveTokens, settleReservation } from '../server/tokenReservations.js'
 import { db, id, nowIso } from '../server/db.js'
 
@@ -64,6 +64,60 @@ test('requestHostname prioritizes authoritative Host over spoofed X-Forwarded-Ho
   // When Host is absent, fall back to forwarded host
   const fallback = requestHostname({ 'x-forwarded-host': 'internal.local' })
   assert.equal(fallback, 'internal.local')
+})
+
+test('isAdminConsoleHost prevents host header bypass and validates allowed hosts strictly', () => {
+  const origSiteUrl = process.env.SITE_URL
+  const origAllowedHosts = process.env.ADMIN_ALLOWED_HOSTS
+
+  try {
+    delete process.env.SITE_URL
+    delete process.env.ADMIN_ALLOWED_HOSTS
+
+    // 1. DEFAULT_ADMIN_HOSTS allow localhost and 127.0.0.1
+    assert.equal(isAdminConsoleHost('localhost'), true)
+    assert.equal(isAdminConsoleHost('localhost:8787'), true)
+    assert.equal(isAdminConsoleHost('127.0.0.1'), true)
+    assert.equal(isAdminConsoleHost('127.0.0.1:8787'), true)
+
+    // 2. Arbitrary attacker-controlled domains must be rejected
+    assert.equal(isAdminConsoleHost('admin.attacker.com'), false)
+    assert.equal(isAdminConsoleHost('dev-admin.attacker.com'), false)
+    assert.equal(isAdminConsoleHost('admin.attacker.com:443'), false)
+    assert.equal(isAdminConsoleHost('attacker.com'), false)
+    assert.equal(isAdminConsoleHost(''), false)
+    assert.equal(isAdminConsoleHost(null), false)
+    assert.equal(isAdminConsoleHost(undefined), false)
+
+    // 3. Configured site domain via SITE_URL
+    process.env.SITE_URL = 'https://mysite.com'
+    assert.equal(isAdminConsoleHost('admin.mysite.com'), true)
+    assert.equal(isAdminConsoleHost('dev-admin.mysite.com'), true)
+    assert.equal(isAdminConsoleHost('admin.mysite.com:8443'), true)
+    // Non-admin hosts or attacker hosts still rejected
+    assert.equal(isAdminConsoleHost('mysite.com'), false)
+    assert.equal(isAdminConsoleHost('admin.attacker.com'), false)
+    assert.equal(isAdminConsoleHost('dev-admin.attacker.com'), false)
+    assert.equal(isAdminConsoleHost('admin.mysite.com.attacker.com'), false)
+
+    // 4. Explicit ADMIN_ALLOWED_HOSTS entries
+    process.env.ADMIN_ALLOWED_HOSTS = 'admin.custom.org, console.internal:8080'
+    assert.equal(isAdminConsoleHost('admin.custom.org'), true)
+    assert.equal(isAdminConsoleHost('admin.custom.org:443'), true)
+    assert.equal(isAdminConsoleHost('console.internal'), true)
+    assert.equal(isAdminConsoleHost('evil.custom.org'), false)
+  } finally {
+    if (origSiteUrl !== undefined) {
+      process.env.SITE_URL = origSiteUrl
+    } else {
+      delete process.env.SITE_URL
+    }
+    if (origAllowedHosts !== undefined) {
+      process.env.ADMIN_ALLOWED_HOSTS = origAllowedHosts
+    } else {
+      delete process.env.ADMIN_ALLOWED_HOSTS
+    }
+  }
 })
 
 test('tryReserveTokens blocks parallel requests exceeding spendLimitTokens', () => {

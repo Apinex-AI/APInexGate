@@ -245,6 +245,76 @@ db.exec(`
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS subscription_payments (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    plan_key TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL,
+    asset TEXT,
+    status TEXT NOT NULL,
+    order_id TEXT NOT NULL UNIQUE,
+    payment_id TEXT,
+    payer_wallet TEXT,
+    expected_raw_amount TEXT,
+    token_mint TEXT,
+    price_usd REAL,
+    treasury TEXT,
+    pay_amount TEXT,
+    credited_at TEXT,
+    subscription_id TEXT,
+    raw_status TEXT,
+    provider TEXT,
+    plan_days INTEGER,
+    plan_kind TEXT,
+    plan_token_limit INTEGER,
+    invoice_url TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_subscription_payments_user ON subscription_payments (user_id, created_at);
+
+  CREATE TABLE IF NOT EXISTS rpm_grants (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    rpm INTEGER NOT NULL,
+    note TEXT,
+    updated_at TEXT NOT NULL,
+    expires_at TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS rpm_payments (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    plan_key TEXT NOT NULL,
+    rpm INTEGER NOT NULL,
+    amount_cents INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    order_id TEXT NOT NULL UNIQUE,
+    payment_id TEXT,
+    payer_wallet TEXT,
+    expected_raw_amount TEXT,
+    token_mint TEXT,
+    price_usd REAL,
+    treasury TEXT,
+    pay_amount TEXT,
+    raw_status TEXT,
+    credited_at TEXT,
+    invoice_url TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_rpm_payments_user ON rpm_payments(user_id, created_at);
+
+  CREATE TABLE IF NOT EXISTS wallet_purchases (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    source_ref TEXT NOT NULL UNIQUE,
+    amount_cents INTEGER NOT NULL,
+    amount_tokens INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_wallet_purchases_user ON wallet_purchases(user_id, created_at);
 `)
 
 const cryptoPaymentColumns = db.prepare('PRAGMA table_info(crypto_payments)').all() as Array<{ name: string }>
@@ -363,10 +433,22 @@ db.prepare(`UPDATE users SET status = 'active' WHERE status = 'trial'`).run()
   if (!cols.some((column) => column.name === 'auth_method')) {
     db.exec("ALTER TABLE users ADD COLUMN auth_method TEXT NOT NULL DEFAULT 'email'")
   }
+  if (!cols.some((column) => column.name === 'rpm_plan')) {
+    db.exec("ALTER TABLE users ADD COLUMN rpm_plan TEXT NOT NULL DEFAULT 'free'")
+  }
+  if (!cols.some((column) => column.name === 'rpm_expires_at')) {
+    db.exec('ALTER TABLE users ADD COLUMN rpm_expires_at TEXT')
+  }
 
 }
-db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_telegram_id ON users (telegram_id) WHERE telegram_id IS NOT NULL`)
-db.exec(`CREATE INDEX IF NOT EXISTS idx_users_telegram_verified ON users (telegram_verified_at) WHERE telegram_verified_at IS NOT NULL`)
+db.exec(`
+  DROP INDEX IF EXISTS idx_users_telegram_id;
+  DROP INDEX IF EXISTS idx_users_telegram_verified;
+  DROP TABLE IF EXISTS telegram_link_tokens;
+  DROP TABLE IF EXISTS telegram_chats;
+  DROP TABLE IF EXISTS telegram_broadcasts;
+  DROP TABLE IF EXISTS admin_login_approvals;
+`)
 db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_solana_wallet ON users (solana_wallet) WHERE solana_wallet IS NOT NULL`)
 
 {
@@ -505,45 +587,7 @@ db.exec(`
   );
 `)
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS telegram_link_tokens (
-    token TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    expires_at TEXT NOT NULL,
-    consumed_at TEXT,
-    created_at TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_telegram_link_user ON telegram_link_tokens (user_id, created_at);
-`)
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS telegram_chats (
-    chat_id TEXT PRIMARY KEY,
-    username TEXT,
-    first_name TEXT,
-    user_id TEXT,
-    started_at TEXT NOT NULL,
-    last_seen_at TEXT NOT NULL,
-    blocked_at TEXT
-  );
-  CREATE INDEX IF NOT EXISTS idx_telegram_chats_username ON telegram_chats (username);
-  CREATE INDEX IF NOT EXISTS idx_telegram_chats_user ON telegram_chats (user_id);
-
-  CREATE TABLE IF NOT EXISTS telegram_broadcasts (
-    id TEXT PRIMARY KEY,
-    audience TEXT NOT NULL,
-    target TEXT,
-    body TEXT NOT NULL,
-    status TEXT NOT NULL,
-    total INTEGER NOT NULL DEFAULT 0,
-    sent INTEGER NOT NULL DEFAULT 0,
-    failed INTEGER NOT NULL DEFAULT 0,
-    blocked INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL,
-    finished_at TEXT,
-    last_error TEXT
-  );
-`)
 
 
 {
@@ -879,6 +923,12 @@ export function nowIso() {
 
 export function id(prefix: string) {
   return `${prefix}_${crypto.randomUUID()}`
+}
+
+export function tableExists(table: string): boolean {
+  return Boolean(
+    db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`).get(table),
+  )
 }
 
 const DEFAULT_MIN_TOPUP_CENTS = 100

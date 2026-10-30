@@ -106,7 +106,7 @@ test('buildAdminStatistics includes topUps and rpmPurchases chart series', async
   // Record an RPM purchase today ($10.80 = 1080 cents)
   upgradeUserRpm(userId, { rpm: 30, amountCents: 1080, paymentId: `pay_${id('p')}` })
 
-  const stats = await buildAdminStatistics({ period: '7d' })
+  const stats: any = await buildAdminStatistics({ period: '7d' })
   assert.ok(Array.isArray(stats.charts.series.topUps), 'topUps series should exist')
   assert.ok(Array.isArray(stats.charts.series.rpmPurchases), 'rpmPurchases series should exist')
   assert.ok((stats.charts.meta.topUps?.total ?? 0) >= 25, 'topUps total should include $25 top-up')

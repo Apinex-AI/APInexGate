@@ -38,8 +38,27 @@ function shellQuote(value: string) {
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
+function psQuote(value: string) {
+  return `'${value.replace(/'/g, "''")}'`
+}
+
 function pyString(value: string) {
   return JSON.stringify(value)
+}
+
+function bashInjectKey(targetFileVar: string, keyVar = '$KEY') {
+  const rawVar = keyVar.replace(/^\$/, '')
+  return `if command -v python3 >/dev/null 2>&1; then
+  python3 -c 'import json, sys; p, k = sys.argv[1], sys.argv[2]; t = open(p, "r", encoding="utf-8").read().replace("__API_KEY__", json.dumps(k)[1:-1]); open(p, "w", encoding="utf-8").write(t)' ${targetFileVar} ${keyVar}
+elif command -v node >/dev/null 2>&1; then
+  node -e 'const fs = require("fs"); const p = process.argv[1]; const k = process.argv[2]; fs.writeFileSync(p, fs.readFileSync(p, "utf8").replaceAll("__API_KEY__", JSON.stringify(k).slice(1, -1)))' ${targetFileVar} ${keyVar}
+else
+  KEY_ESCAPED="\${${rawVar}//\\\\/\\\\\\\\}"
+  KEY_ESCAPED="\${KEY_ESCAPED//\\"/\\\\\\"}"
+  KEY_ESCAPED="\${KEY_ESCAPED//&/\\\\&}"
+  TMP_CONTENT=$(< ${targetFileVar})
+  printf '%s\n' "\${TMP_CONTENT//__API_KEY__/$KEY_ESCAPED}" > ${targetFileVar}
+fi`
 }
 
 export function isInstallTool(value: string): value is InstallTool {
@@ -309,23 +328,26 @@ mkdir -p "$BACKUP_DIR"
 [[ -f "$CODEX_DIR/config.toml" ]] && cp "$CODEX_DIR/config.toml" "$BACKUP_DIR/config.toml"
 [[ -f "$CODEX_DIR/auth.json" ]] && cp "$CODEX_DIR/auth.json" "$BACKUP_DIR/auth.json"
 
-cat > "$CODEX_DIR/config.toml" <<EOF
-model = "${model}"
-model_provider = "${SLUG()}"
+cat > "$CODEX_DIR/config.toml" <<'CODEX_CONFIG_EOF'
+model = ${JSON.stringify(model)}
+model_provider = ${JSON.stringify(SLUG())}
 
 [model_providers.${SLUG()}]
-name = "${NAME()}"
-base_url = "${baseUrl}"
+name = ${JSON.stringify(NAME())}
+base_url = ${JSON.stringify(baseUrl)}
 wire_api = "responses"
 requires_openai_auth = true
-EOF
+CODEX_CONFIG_EOF
 
-cat > "$CODEX_DIR/auth.json" <<EOF
+cat > "$CODEX_DIR/auth.json" <<'CODEX_AUTH_EOF'
 {
   "auth_mode": "apikey",
-  "OPENAI_API_KEY": "$KEY"
+  "OPENAI_API_KEY": "__API_KEY__"
 }
-EOF
+CODEX_AUTH_EOF
+
+${bashInjectKey('"$CODEX_DIR/auth.json"')}
+chmod 600 "$CODEX_DIR/auth.json" 2>/dev/null || true
 
 echo "Done. Config written to $CODEX_DIR"
 echo "Backup: $BACKUP_DIR"
@@ -363,22 +385,25 @@ mkdir -p "$CLAUDE_DIR"
 SETTINGS="$CLAUDE_DIR/settings.json"
 [[ -f "$SETTINGS" ]] && cp "$SETTINGS" "$SETTINGS.${SLUG()}.bak"
 
-cat > "$SETTINGS" <<EOF
+cat > "$SETTINGS" <<'SETTINGS_EOF'
 {
   "hasCompletedOnboarding": true,
   "env": {
-    "ANTHROPIC_BASE_URL": "${baseUrl}",
-    "ANTHROPIC_AUTH_TOKEN": "$KEY",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "${opus}",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "${sonnet}",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "${haiku}"
+    "ANTHROPIC_BASE_URL": ${JSON.stringify(baseUrl)},
+    "ANTHROPIC_AUTH_TOKEN": "__API_KEY__",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": ${JSON.stringify(opus)},
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": ${JSON.stringify(sonnet)},
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": ${JSON.stringify(haiku)}
   }
 }
-EOF
+SETTINGS_EOF
+
+${bashInjectKey('"$SETTINGS"')}
+chmod 600 "$SETTINGS" 2>/dev/null || true
 
 echo "Done. Config written to $SETTINGS"
 echo "ANTHROPIC_BASE_URL=${baseUrl}  (Claude Code calls ${baseUrl}/v1/messages)"
-echo "Models: opus=${opus}  sonnet=${sonnet}  haiku=${haiku}"
+printf 'Models: opus=%s  sonnet=%s  haiku=%s\\n' ${shellQuote(opus)} ${shellQuote(sonnet)} ${shellQuote(haiku)}
 echo "Fully quit and reopen Claude Code."
 `
 }
@@ -427,23 +452,26 @@ if [[ ! -f "$STATE" ]]; then
   done
 fi
 
-cat > "$PROFILE" <<EOF
+cat > "$PROFILE" <<'CLAUDE_PROFILE_EOF'
 {
-  "name": "${NAME()}",
-  "baseURL": "${baseUrl}",
-  "apiKey": "$KEY",
+  "name": ${JSON.stringify(NAME())},
+  "baseURL": ${JSON.stringify(baseUrl)},
+  "apiKey": "__API_KEY__",
   "provider": "openai"
 }
-EOF
+CLAUDE_PROFILE_EOF
 
-cat > "$META" <<EOF
+${bashInjectKey('"$PROFILE"')}
+chmod 600 "$PROFILE" 2>/dev/null || true
+
+cat > "$META" <<'CLAUDE_META_EOF'
 {
-  "appliedId": "${profileId}",
+  "appliedId": ${JSON.stringify(profileId)},
   "entries": [
-    { "id": "${profileId}", "name": "${NAME()}" }
+    { "id": ${JSON.stringify(profileId)}, "name": ${JSON.stringify(NAME())} }
   ]
 }
-EOF
+CLAUDE_META_EOF
 
 if command -v python3 >/dev/null 2>&1; then
   P1_CONFIG="$P1_CONFIG" python3 - <<'PY'
@@ -493,8 +521,6 @@ function opencodeUnix() {
     },
   }
   const jsonStr = JSON.stringify(configObj, null, 2)
-    .replace('"$schema"', '"\\$schema"')
-    .replace('"__API_KEY__"', '"$KEY"')
   const endpoint = installEndpoint('opencode')
 
   return `#!/usr/bin/env bash
@@ -516,12 +542,15 @@ mkdir -p "$OPENCODE_DIR"
 CONFIG="$OPENCODE_DIR/opencode.json"
 [[ -f "$CONFIG" ]] && cp "$CONFIG" "$CONFIG.${SLUG()}.bak"
 
-cat > "$CONFIG" <<EOF
+cat > "$CONFIG" <<'OPENCODE_CONFIG_EOF'
 ${jsonStr}
-EOF
+OPENCODE_CONFIG_EOF
+
+${bashInjectKey('"$CONFIG"')}
+chmod 600 "$CONFIG" 2>/dev/null || true
 
 echo "Done. Config written to $CONFIG"
-echo "Active model set to: ${SLUG()}/${defaultModel}"
+printf 'Active model set to: %s/%s\\n' ${shellQuote(SLUG())} ${shellQuote(defaultModel)}
 echo "Run 'opencode' to start."
 `
 }
@@ -551,8 +580,8 @@ if (-not $py) { $py = Get-Command python -ErrorAction SilentlyContinue }
 if (-not $py) { Write-Error 'Python 3 is required to configure Cursor on Windows.'; exit 1 }
 
 $env:API_KEY = $Key
-$env:BASE_URL = '${baseUrl}'
-$env:DEFAULT_MODEL = '${defaultModel}'
+$env:BASE_URL = ${psQuote(baseUrl)}
+$env:DEFAULT_MODEL = ${psQuote(defaultModel)}
 $env:MODELS_JSON = @'
 ${JSON.stringify(specs)}
 '@
@@ -644,22 +673,23 @@ function codexWindows() {
   return `${psHeader('connect Codex')}
 $dir = Join-Path $env:USERPROFILE ".codex"
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
-@"
-model = "${model}"
-model_provider = "${SLUG()}"
+@'
+model = ${JSON.stringify(model)}
+model_provider = ${JSON.stringify(SLUG())}
 
 [model_providers.${SLUG()}]
-name = "${NAME()}"
-base_url = "${baseUrl}"
+name = ${JSON.stringify(NAME())}
+base_url = ${JSON.stringify(baseUrl)}
 wire_api = "responses"
 requires_openai_auth = true
-"@ | Write-Utf8NoBom (Join-Path $dir "config.toml")
-@"
+'@ | Write-Utf8NoBom (Join-Path $dir "config.toml")
+$authContent = @'
 {
   "auth_mode": "apikey",
-  "OPENAI_API_KEY": "$Key"
+  "OPENAI_API_KEY": "__API_KEY__"
 }
-"@ | Write-Utf8NoBom (Join-Path $dir "auth.json")
+'@.Replace('__API_KEY__', $Key)
+$authContent | Write-Utf8NoBom (Join-Path $dir "auth.json")
 Write-Host "Done. Config written to $dir. Restart Codex."
 `
 }
@@ -679,18 +709,19 @@ $dir = Join-Path $env:USERPROFILE ".claude"
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
 $settings = Join-Path $dir "settings.json"
 if (Test-Path $settings) { Copy-Item $settings "$settings.${SLUG()}.bak" -Force }
-@"
+$settingsContent = @'
 {
   "hasCompletedOnboarding": true,
   "env": {
-    "ANTHROPIC_BASE_URL": "${baseUrl}",
-    "ANTHROPIC_AUTH_TOKEN": "$Key",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "${opus}",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "${sonnet}",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "${haiku}"
+    "ANTHROPIC_BASE_URL": ${JSON.stringify(baseUrl)},
+    "ANTHROPIC_AUTH_TOKEN": "__API_KEY__",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": ${JSON.stringify(opus)},
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": ${JSON.stringify(sonnet)},
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": ${JSON.stringify(haiku)}
   }
 }
-"@ | Write-Utf8NoBom $settings
+'@.Replace('__API_KEY__', $Key)
+$settingsContent | Write-Utf8NoBom $settings
 Write-Host "Done. ANTHROPIC_BASE_URL=${baseUrl} (Claude Code calls ${baseUrl}/v1/messages)"
 Write-Host "Fully quit and reopen Claude Code."
 `
@@ -709,20 +740,21 @@ New-Item -ItemType Directory -Force -Path $p1 | Out-Null
 $profilePath = Join-Path $lib "${profileId}.json"
 $metaPath = Join-Path $lib "_meta.json"
 $p1Config = Join-Path $p1 "claude_desktop_config.json"
-@"
+$profileJson = @'
 {
-  "name": "${NAME()}",
-  "baseURL": "${baseUrl}",
-  "apiKey": "$Key",
+  "name": ${JSON.stringify(NAME())},
+  "baseURL": ${JSON.stringify(baseUrl)},
+  "apiKey": "__API_KEY__",
   "provider": "openai"
 }
-"@ | Write-Utf8NoBom $profilePath
-@"
+'@.Replace('__API_KEY__', $Key)
+$profileJson | Write-Utf8NoBom $profilePath
+@'
 {
-  "appliedId": "${profileId}",
-  "entries": [{ "id": "${profileId}", "name": "${NAME()}" }]
+  "appliedId": ${JSON.stringify(profileId)},
+  "entries": [{ "id": ${JSON.stringify(profileId)}, "name": ${JSON.stringify(NAME())} }]
 }
-"@ | Write-Utf8NoBom $metaPath
+'@ | Write-Utf8NoBom $metaPath
 $data = @{ deploymentMode = "3p" }
 if (Test-Path $p1Config) {
   try { $existing = Get-Content $p1Config -Raw | ConvertFrom-Json } catch { $existing = $null }
@@ -774,7 +806,7 @@ ${jsonTemplate}
 '@.Replace('__API_KEY__', $Key)
 $jsonContent | Write-Utf8NoBom $configPath
 Write-Host "Done. Config written to $configPath."
-Write-Host "Active model set to: ${SLUG()}/${defaultModel}"
+Write-Host ('Active model set to: ' + ${psQuote(`${SLUG()}/${defaultModel}`)})
 Write-Host "Run opencode in your terminal to start."
 `
 }
@@ -783,7 +815,7 @@ function hermesUnix() {
   const baseUrl = API_BASE()
   const specs = activeModelSpecs(24)
   const defaultModel = defaultModelId(specs)
-  const yamlModels = specs.map((s) => `      - "${s.id}"`).join('\n')
+  const yamlModels = specs.map((s) => `      - ${JSON.stringify(s.id)}`).join('\n')
   const endpoint = installEndpoint('hermes')
 
   return `#!/usr/bin/env bash
@@ -804,27 +836,28 @@ H_DIR="\${HOME}/.hermes"
 mkdir -p "$H_DIR"
 [[ -f "$H_DIR/config.yaml" ]] && cp "$H_DIR/config.yaml" "$H_DIR/config.yaml.${SLUG()}.bak"
 
-cat > "$H_DIR/config.yaml" <<EOF
+cat > "$H_DIR/config.yaml" <<'HERMES_CONFIG_EOF'
 custom_providers:
-  - name: "${NAME()}"
-    base_url: "${baseUrl}"
+  - name: ${JSON.stringify(NAME())}
+    base_url: ${JSON.stringify(baseUrl)}
     key_env: "OPENAI_API_KEY"
     api_mode: "chat_completions"
     discover_models: false
     models:
 ${yamlModels}
 model:
-  default: "${defaultModel}"
+  default: ${JSON.stringify(defaultModel)}
   provider: "custom:${SLUG()}"
-  base_url: "${baseUrl}"
+  base_url: ${JSON.stringify(baseUrl)}
   context_length: 1000000
-EOF
+HERMES_CONFIG_EOF
 
 touch "$H_DIR/.env"
 cp "$H_DIR/.env" "$H_DIR/.env.${SLUG()}.bak" 2>/dev/null || true
 grep -vE '^(OPENAI_API_KEY|OPENAI_BASE_URL)=' "$H_DIR/.env" > "$H_DIR/.env.tmp" 2>/dev/null || true
 printf 'OPENAI_API_KEY=%s\nOPENAI_BASE_URL=%s\n' "$KEY" "${baseUrl}" >> "$H_DIR/.env.tmp"
 mv "$H_DIR/.env.tmp" "$H_DIR/.env"
+chmod 600 "$H_DIR/.env" 2>/dev/null || true
 
 [[ -f "$H_DIR/auth.json" ]] && mv "$H_DIR/auth.json" "$H_DIR/auth.json.${SLUG()}.bak"
 
@@ -837,35 +870,36 @@ function hermesWindows() {
   const specs = activeModelSpecs(24)
   const baseUrl = API_BASE()
   const defaultModel = defaultModelId(specs)
-  const yamlModels = specs.map((s) => `      - "${s.id}"`).join('\n')
+  const yamlModels = specs.map((s) => `      - ${JSON.stringify(s.id)}`).join('\n')
 
   return `${psHeader('connect Hermes')}
 $dir = Join-Path $env:USERPROFILE ".hermes"
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
 $configPath = Join-Path $dir "config.yaml"
 if (Test-Path $configPath) { Copy-Item $configPath "$configPath.${SLUG()}.bak" -Force }
-@"
+@'
 custom_providers:
-  - name: "${NAME()}"
-    base_url: "${baseUrl}"
+  - name: ${JSON.stringify(NAME())}
+    base_url: ${JSON.stringify(baseUrl)}
     key_env: "OPENAI_API_KEY"
     api_mode: "chat_completions"
     discover_models: false
     models:
 ${yamlModels}
 model:
-  default: "${defaultModel}"
+  default: ${JSON.stringify(defaultModel)}
   provider: "custom:${SLUG()}"
-  base_url: "${baseUrl}"
+  base_url: ${JSON.stringify(baseUrl)}
   context_length: 1000000
-"@ | Write-Utf8NoBom $configPath
+'@ | Write-Utf8NoBom $configPath
 
 $envPath = Join-Path $dir ".env"
 if (Test-Path $envPath) { Copy-Item $envPath "$envPath.${SLUG()}.bak" -Force }
-@"
-OPENAI_API_KEY=$Key
+$envContent = @'
+OPENAI_API_KEY=__API_KEY__
 OPENAI_BASE_URL=${baseUrl}
-"@ | Write-Utf8NoBom $envPath
+'@.Replace('__API_KEY__', $Key)
+$envContent | Write-Utf8NoBom $envPath
 
 $auth = Join-Path $dir "auth.json"
 if (Test-Path $auth) { Move-Item -Force $auth "$auth.${SLUG()}.bak" }

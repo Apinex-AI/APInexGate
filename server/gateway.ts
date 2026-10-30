@@ -9,6 +9,7 @@ import {
 import type { UpstreamProvider } from '../shared/providers.js'
 import { dispatcherForProxyIndex } from './providerProxy.js'
 import { db, id, nowIso, touchUserLastSeen } from './db.js'
+import { assertSafeUpstreamUrl, sanitizeErrorMessage } from './upstreamFallback.js'
 
 import { consumeRateLimit, rateLimitKey, RL, setRateLimitHeaders } from './rateLimit.js'
 import { getAccountRpm } from './rpmPlans.js'
@@ -81,7 +82,7 @@ export function upstreamFailureMessage(reason: unknown, payload: Record<string, 
   ) {
     return `Upstream request timed out after ${upstreamTimeoutFor(payload, hasFallbacks, provider) / 1000}s`
   }
-  return reason instanceof Error ? reason.message : 'Upstream connection failed'
+  return sanitizeErrorMessage(reason instanceof Error ? reason.message : 'Upstream connection failed')
 }
 
 // Time budget for *finding* a usable upstream, not for streaming a reply. A
@@ -252,7 +253,10 @@ function authenticateApiKey(request: FastifyRequest): AuthResult {
     )
     .get(key.user_id) as UserRow | undefined
 
-  if (!user || user.status === 'suspended') {
+  if (!user || user.status === 'suspended' || user.status === 'pending' || user.status !== 'active') {
+    if (user?.status === 'pending') {
+      return { error: 'Account pending activation', status: 403 }
+    }
     return { error: 'Account suspended or missing', status: 403 }
   }
 
@@ -612,12 +616,14 @@ function isRetryableStatus(status: number) {
 
 function extractErrorMessage(errorBody: Record<string, unknown>, status: number) {
   const nested = errorBody.error
-  if (typeof nested === 'string') return nested
-  if (nested && typeof nested === 'object' && 'message' in nested) {
-    return String((nested as { message?: string }).message ?? `HTTP ${status}`)
+  let message = `HTTP ${status}`
+  if (typeof nested === 'string') message = nested
+  else if (nested && typeof nested === 'object' && 'message' in nested) {
+    message = String((nested as { message?: string }).message ?? `HTTP ${status}`)
+  } else if (typeof errorBody.message === 'string') {
+    message = errorBody.message
   }
-  if (typeof errorBody.message === 'string') return errorBody.message
-  return `HTTP ${status}`
+  return sanitizeErrorMessage(message)
 }
 
 // These upstreams have per-account quotas. Spread independent requests evenly;
@@ -710,6 +716,21 @@ export function isFreeTierModelId(publicModelId: string) {
   return id.startsWith('free/') || id.startsWith('free-') || id.endsWith('-free')
 }
 
+const FORBIDDEN_UPSTREAM_HEADER_NAMES = new Set([
+  'src',
+  'cookie',
+  'set-cookie',
+  'authorization',
+  'x-api-key',
+  'api-key',
+  'x-session-id',
+  'x-user-id',
+  'x-admin-key',
+  'host',
+  'connection',
+  'content-length',
+])
+
 export function buildUpstreamRequestHeaders(
   providerSecret: string,
   extraHeaders?: Record<string, string>,
@@ -720,8 +741,22 @@ export function buildUpstreamRequestHeaders(
   }
   if (extraHeaders) {
     for (const [key, value] of Object.entries(extraHeaders)) {
-      if (key.toLowerCase() === 'src') continue
+      const lower = key.trim().toLowerCase()
+      if (
+        FORBIDDEN_UPSTREAM_HEADER_NAMES.has(lower) ||
+        lower.startsWith('x-internal') ||
+        lower.startsWith('x-admin')
+      ) {
+        continue
+      }
       headers[key] = value
+    }
+  }
+  // Ensure no case-variant of Authorization or src remains from extraHeaders
+  for (const k of Object.keys(headers)) {
+    const lower = k.toLowerCase()
+    if (lower === 'authorization' || lower === 'src') {
+      delete headers[k]
     }
   }
   headers.Authorization = `Bearer ${providerSecret}`
@@ -738,15 +773,32 @@ async function upstreamPost(
   extraHeaders?: Record<string, string>,
   hasFallbacks = false,
   provider?: GatewayUpstream,
+  clientSignal?: AbortSignal,
 ) {
+  const targetUrl = `${baseUrl}/${path}`
+  assertSafeUpstreamUrl(targetUrl)
+
   const headers = buildUpstreamRequestHeaders(providerSecret, extraHeaders)
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), upstreamTimeoutFor(payload, hasFallbacks, provider))
+
+  const onClientAbort = () => {
+    controller.abort()
+  }
+  if (clientSignal) {
+    if (clientSignal.aborted) {
+      clearTimeout(timeout)
+      controller.abort()
+    } else {
+      clientSignal.addEventListener('abort', onClientAbort, { once: true })
+    }
+  }
+
   try {
     // fetch resolves once response headers arrive. Clear the connection timeout at
     // that point so long-running SSE bodies are not aborted mid-stream.
-    return await undiciFetch(`${baseUrl}/${path}`, {
+    return await undiciFetch(targetUrl, {
       method: 'POST',
       headers,
       body: JSON.stringify(payload),
@@ -755,6 +807,9 @@ async function upstreamPost(
     })
   } finally {
     clearTimeout(timeout)
+    if (clientSignal) {
+      clientSignal.removeEventListener('abort', onClientAbort)
+    }
   }
 }
 
@@ -798,28 +853,30 @@ function cleanJsonSchema(schema: unknown): unknown {
 }
 
 function sanitizeToolDefinitions(tools: unknown[]): unknown[] {
-  return tools.map((tool) => {
-    if (!tool || typeof tool !== 'object') return tool
-    const row = { ...(tool as Record<string, unknown>) }
+  if (!Array.isArray(tools)) return []
+  return tools
+    .filter((tool): tool is Record<string, unknown> => Boolean(tool && typeof tool === 'object'))
+    .map((tool) => {
+      const row = { ...(tool as Record<string, unknown>) }
 
-    if (row.function && typeof row.function === 'object') {
-      const fn = { ...(row.function as Record<string, unknown>) }
-      if (!fn.parameters || typeof fn.parameters !== 'object') {
-        fn.parameters = { type: 'object', properties: {} }
-      } else {
-        fn.parameters = cleanJsonSchema(fn.parameters)
+      if (row.function && typeof row.function === 'object') {
+        const fn = { ...(row.function as Record<string, unknown>) }
+        if (!fn.parameters || typeof fn.parameters !== 'object') {
+          fn.parameters = { type: 'object', properties: {} }
+        } else {
+          fn.parameters = cleanJsonSchema(fn.parameters)
+        }
+        row.function = fn
+      } else if (row.type === 'function' && !row.function) {
+        row.function = { name: 'tool', parameters: { type: 'object', properties: {} } }
       }
-      row.function = fn
-    } else if (row.type === 'function' && !row.function) {
-      row.function = { name: 'tool', parameters: { type: 'object', properties: {} } }
-    }
 
-    if (row.parameters && typeof row.parameters === 'object') {
-      row.parameters = cleanJsonSchema(row.parameters)
-    }
+      if (row.parameters && typeof row.parameters === 'object') {
+        row.parameters = cleanJsonSchema(row.parameters)
+      }
 
-    return row
-  })
+      return row
+    })
 }
 
 function sanitizeCallIds(payload: Record<string, unknown>) {
@@ -880,7 +937,7 @@ export function applyUpstreamPayloadQuirks(
   }
 
   // Clean tools definitions across all providers (fixes regex pattern errors, missing parameters, invalid required)
-  if (Array.isArray(payload.tools) && payload.tools.length > 0) {
+  if (Array.isArray(payload.tools)) {
     payload.tools = sanitizeToolDefinitions(payload.tools)
   }
 
@@ -969,7 +1026,6 @@ export function applyUpstreamPayloadQuirks(
     for (let i = 0; i < rawMsgs.length; i++) {
       const msg = rawMsgs[i]
       if (!msg || typeof msg !== 'object') {
-        newMsgs.push(msg as Record<string, unknown>)
         continue
       }
       const row = { ...(msg as Record<string, unknown>) }
@@ -1444,10 +1500,13 @@ function languageHintForLatestUserMessage(text: string) {
 }
 
 function injectOpenAiSystemPolicy(messages: Array<Record<string, unknown>>) {
-  const next = messages.map((m) => ({ ...m }))
+  const validMessages = Array.isArray(messages)
+    ? messages.filter((m): m is Record<string, unknown> => Boolean(m && typeof m === 'object'))
+    : []
+  const next = validMessages.map((m) => ({ ...m }))
   const languageHint = languageHintForLatestUserMessage(latestUserText(next))
   const policy = languageHint ? `${LANGUAGE_AND_TOOLS_POLICY}\n${languageHint}` : LANGUAGE_AND_TOOLS_POLICY
-  const firstSystem = next.find((m) => m.role === 'system')
+  const firstSystem = next.find((m) => m && m.role === 'system')
   if (firstSystem) {
     const current = typeof firstSystem.content === 'string' ? firstSystem.content : ''
     if (!current.startsWith(LANGUAGE_AND_TOOLS_POLICY)) {
@@ -1741,10 +1800,23 @@ async function proxyModelRequest(input: {
   }
 
   const body = (request.body ?? {}) as Record<string, unknown>
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return sendError(400, 'Invalid request body, expected a JSON object', 'invalid_request_error')
+  }
   if (playground) stripPlaygroundTools(body)
-  const publicModelId = String(body.model ?? '').trim()
+  const publicModelId = typeof body.model === 'string' ? body.model.trim() : ''
   if (!publicModelId) {
-        return sendError(400, 'model is required')
+    return sendError(400, 'model is required')
+  }
+
+  if (path === 'chat/completions' && (body.messages == null || !Array.isArray(body.messages))) {
+    return sendError(400, 'messages is required and must be an array', 'invalid_request_error')
+  }
+  if (path === 'messages' && (body.messages == null || !Array.isArray(body.messages))) {
+    return sendError(400, 'messages is required and must be an array', 'invalid_request_error')
+  }
+  if (path === 'responses' && body.input == null && body.instructions == null) {
+    return sendError(400, 'input is required', 'invalid_request_error')
   }
 
   const model = resolveModel(publicModelId)
@@ -1923,6 +1995,15 @@ async function proxyModelRequest(input: {
       return sendError(402, `Free-model allowance is too low for this request. It requires up to ${reservationEstimate.costTokens.toLocaleString('en-US')} weighted tokens.`, 'billing_error')
     }
   }
+  const clientAbortController = new AbortController()
+  const onClientClose = () => {
+    if (!reply.raw.writableEnded) {
+      clientAbortController.abort()
+    }
+  }
+  request.raw.on('close', onClientClose)
+  reply.raw.on('close', onClientClose)
+
   const reservation = tryReserveTokens({
     userId: auth.user.id,
     apiKeyId: auth.key.id,
@@ -1934,199 +2015,229 @@ async function proxyModelRequest(input: {
     modelId: model.id,
     path: `/v1/${path}`,
     allowRestrictedCredits: !anthropicModel,
+    signal: clientAbortController.signal,
   })
   if (!reservation.ok) {
-        return sendError(reservation.status, reservation.error, 'billing_error')
+    request.raw.off('close', onClientClose)
+    reply.raw.off('close', onClientClose)
+    return sendError(reservation.status, reservation.error, 'billing_error')
   }
 
-  // Fairness dispatch: when the queue is active (upstream saturation),
-  // subscribers and paid requests skip ahead of free users. Once the slot is granted, the request
-  // owns it until completion — a queued request is never preempted.
-  const accountRpm = getAccountRpm(auth.user.id)
-  const dispatch = await acquireDispatchSlot(auth.user.id, {
-    priority: accountRpm.source !== 'free' || !freeModel,
-  })
-  if (dispatch.timedOut) {
-    releaseDispatchSlot()
-    const retryAfterSec = 5
-    setRateLimitHeaders(reply, { limit: 0, remaining: 0, resetAt: Date.now() + retryAfterSec * 1000, retryAfterSec })
-    return sendError(
-      429,
-      'The model is currently busy. Your request was queued behind other users and timed out. Please retry shortly.',
-      'rate_limit_error',
-    )
-  }
-
-  const attemptPlan = stages.flatMap((stage) =>
-    stage.attempts.map((attemptTarget) => ({ ...attemptTarget, stage })),
-  )
-
+  let reservationSettled = false
   try {
-  const maxAttempts = attemptPlan.length
-  let lastError = 'Upstream request failed'
-  let lastStatus = 502
-  let attempt = 0
-  let outputLimitRetried = false
-  let reasoningExhaustionRetried = false
-  const lastFailureByProvider = new Map<GatewayUpstream, { status: number; error: string }>()
-  /**
-   * Retry budget. This bounds only the search for a usable upstream: once a
-   * response is accepted the loop exits, so a long SSE body is never affected.
-   * Without it a stalled provider could burn every key at 60s each and make the
-   * caller wait ten minutes for a failure.
-   */
-  const stageDeadlines = new Map<UpstreamStage, number>()
-  const retryBudgetExhausted = (stage: UpstreamStage) => {
-    const deadline = stageDeadlines.get(stage)
-    if (deadline == null) {
-      // First attempt of a stage always runs, however little time is left.
-      stageDeadlines.set(stage, Date.now() + STAGE_RETRY_BUDGET_MS)
-      return false
-    }
-    return Date.now() > deadline || Date.now() - started > TOTAL_RETRY_BUDGET_MS
-  }
-
-  while (attempt < maxAttempts) {
-    const currentAttempt = attemptPlan[attempt]
-    const providerSecret = currentAttempt.secret
-    const stage = currentAttempt.stage
-    const payload = stage.payload
-    attempt += 1
-
-    const recordStageFailure = (status: number, error: string) => {
-      lastStatus = status
-      lastError = error
-      lastFailureByProvider.set(stage.provider, { status, error })
+    // Fairness dispatch: when the queue is active (upstream saturation),
+    // subscribers and paid requests skip ahead of free users. Once the slot is granted, the request
+    // owns it until completion — a queued request is never preempted.
+    const accountRpm = getAccountRpm(auth.user.id)
+    const dispatch = await acquireDispatchSlot(auth.user.id, {
+      priority: accountRpm.source !== 'free' || !freeModel,
+    })
+    if (dispatch.timedOut) {
+      releaseReservation(reservation.reservationId)
+      releaseDispatchSlot()
+      const retryAfterSec = 5
+      setRateLimitHeaders(reply, { limit: 0, remaining: 0, resetAt: Date.now() + retryAfterSec * 1000, retryAfterSec })
+      return sendError(
+        429,
+        'The model is currently busy. Your request was queued behind other users and timed out. Please retry shortly.',
+        'rate_limit_error',
+      )
     }
 
-    /** Skip the remaining attempts of the current upstream and move to the next one. */
-    const advanceToNextStage = () => {
-      while (attempt < maxAttempts && attemptPlan[attempt].stage === stage) attempt += 1
-      return attempt < maxAttempts
-    }
-
-    const hasLaterStage = stages.indexOf(stage) < stages.length - 1
-
-    // Stop hammering a stage that has already spent its budget; hand over to the
-    // fallback (which still gets its own first attempt) or fail fast.
-    if (retryBudgetExhausted(stage)) {
-      if (advanceToNextStage()) continue
-      break
-    }
+    const attemptPlan = stages.flatMap((stage) =>
+      stage.attempts.map((attemptTarget) => ({ ...attemptTarget, stage })),
+    )
 
     try {
-      const upstream = await upstreamPost(
-        currentAttempt.baseUrl,
-        stage.upstreamPath,
-        providerSecret,
-        payload,
-        dispatcherForProxyIndex(currentAttempt.proxyIndex),
-        undefined,
-        hasLaterStage,
-        stage.provider,
-      )
-
-      if (!upstream.ok) {
-        const errorBody = (await upstream.json().catch(() => ({}))) as Record<string, unknown>
-        recordStageFailure(upstream.status, extractErrorMessage(errorBody, upstream.status))
-
-        if (
-          !outputLimitRetried &&
-          attempt < maxAttempts &&
-          isOutputLimitCompatibilityError(upstream.status, lastError) &&
-          removeOutputLimitsForFreeRetry(payload, freeModel)
-        ) {
-          outputLimitRetried = true
-          continue
+      const maxAttempts = attemptPlan.length
+      let lastError = 'Upstream request failed'
+      let lastStatus = 502
+      let attempt = 0
+      let outputLimitRetried = false
+      let reasoningExhaustionRetried = false
+      const lastFailureByProvider = new Map<GatewayUpstream, { status: number; error: string }>()
+      /**
+       * Retry budget. This bounds only the search for a usable upstream: once a
+       * response is accepted the loop exits, so a long SSE body is never affected.
+       * Without it a stalled provider could burn every key at 60s each and make the
+       * caller wait ten minutes for a failure.
+       */
+      const stageDeadlines = new Map<UpstreamStage, number>()
+      const retryBudgetExhausted = (stage: UpstreamStage) => {
+        const deadline = stageDeadlines.get(stage)
+        if (deadline == null) {
+          // First attempt of a stage always runs, however little time is left.
+          stageDeadlines.set(stage, Date.now() + STAGE_RETRY_BUDGET_MS)
+          return false
         }
-
-        if (upstream.status === 401 || upstream.status === 402 || upstream.status === 403) {
-          markProviderSecretFailed(providerSecret, lastError, upstream.status)
-          // Do not retry another endpoint with a permanently failed key.
-          while (attempt < maxAttempts && attemptPlan[attempt].secret === providerSecret) attempt += 1
-        }
-
-        const canRotate =
-          attempt < maxAttempts &&
-          (isUpstreamTransient(upstream.status, lastError) ||
-            // A backend-variant 400 is worth one more key on the same provider
-            // before handing a free request to a paid fallback.
-            (attemptPlan[attempt]?.stage === stage &&
-              isProviderVariantRetryableError(stage.provider, upstream.status, lastError)) ||
-            upstream.status === 401 ||
-            upstream.status === 402 ||
-            upstream.status === 403)
-        if (canRotate) {
-          // Longer backoff when upstream asks "Retry in Ns". A fallback upstream is
-          // tried immediately: waiting on a rate-limited provider helps nobody.
-          const nextIsSameStage = attemptPlan[attempt]?.stage === stage
-          if (nextIsSameStage) {
-            const retryMatch = lastError.match(/retry in\s+(\d+)/i)
-            const hinted = retryMatch ? Number(retryMatch[1]) * 1000 : 0
-            const waitMs = Math.min(Math.max(hinted || 350 * attempt, 250), 4000)
-            await sleep(waitMs)
-          }
-          continue
-        }
-
-        // If upstream failed with 400 because of an invalid client request
-        // Return the client error directly to save paid fallback balance.
-        const isClientInvalidParamError =
-          upstream.status === 400 &&
-          (lastError.includes('不支持关闭思考') || lastError.includes('始终思考'))
-
-        // A definitive upstream failure (for example a model id the primary no
-        // longer serves) still fails over when another upstream is configured.
-        if (!isClientInvalidParamError && advanceToNextStage()) continue
-
-        recordUsage({
-          userId: auth.user.id,
-          apiKeyId: auth.key.id,
-          modelId: model.id,
-          provider: model.provider,
-          inputTokens: 0,
-          outputTokens: 0,
-          costTokens: 0,
-          latencyMs: Date.now() - started,
-          status: 'error',
-          reservationId: reservation.reservationId,
-        })
-                const responseStatus =
-          publicModelId === 'free/gpt-6-astra' ||
-          upstream.status === 401 ||
-          upstream.status === 402 ||
-          upstream.status === 403
-            ? 503
-            : upstream.status >= 400 && upstream.status < 600
-              ? upstream.status
-              : 502
-        const publicError = publicModelId === 'free/gpt-6-astra'
-          ? 'Model temporarily unavailable'
-          : clientSafeUpstreamError(responseStatus, lastError)
-        return sendError(responseStatus, publicError, 'api_error')
+        return Date.now() > deadline || Date.now() - started > TOTAL_RETRY_BUDGET_MS
       }
 
-      if (stage !== stages[0]) {
-        const walked = stages.slice(0, stages.indexOf(stage) + 1)
-              }
+      while (attempt < maxAttempts) {
+        const currentAttempt = attemptPlan[attempt]
+        const providerSecret = currentAttempt.secret
+        const stage = currentAttempt.stage
+        const payload = stage.payload
+        attempt += 1
 
-      if (stream) {
-        // If the upstream yielded 200 OK headers but has not sent any body chunks
-        // within the timeout window, and we have fallbacks available, advance to next key/provider!
-        const firstChunkTimeoutMs = UPSTREAM_STREAM_FIRST_CHUNK_TIMEOUT_MS
-        if (stages.indexOf(stage) < stages.length - 1 && upstream.body) {
-          const reader = upstream.body.getReader()
-          const firstChunkPromise = reader.read()
-          const timerPromise = new Promise<{ timeout: true }>((resolve) =>
-            setTimeout(() => resolve({ timeout: true }), firstChunkTimeoutMs),
+        const recordStageFailure = (status: number, error: string) => {
+          lastStatus = status
+          lastError = error
+          lastFailureByProvider.set(stage.provider, { status, error })
+        }
+
+        /** Skip the remaining attempts of the current upstream and move to the next one. */
+        const advanceToNextStage = () => {
+          while (attempt < maxAttempts && attemptPlan[attempt].stage === stage) attempt += 1
+          return attempt < maxAttempts
+        }
+
+        const hasLaterStage = stages.indexOf(stage) < stages.length - 1
+
+        // Stop hammering a stage that has already spent its budget; hand over to the
+        // fallback (which still gets its own first attempt) or fail fast.
+        if (retryBudgetExhausted(stage)) {
+          if (advanceToNextStage()) continue
+          break
+        }
+
+        try {
+          const upstream = await upstreamPost(
+            currentAttempt.baseUrl,
+            stage.upstreamPath,
+            providerSecret,
+            payload,
+            dispatcherForProxyIndex(currentAttempt.proxyIndex),
+            undefined,
+            hasLaterStage,
+            stage.provider,
+            clientAbortController.signal,
           )
-          const raceResult = await Promise.race([firstChunkPromise, timerPromise])
-          if ('timeout' in raceResult && raceResult.timeout) {
-            void reader.cancel().catch(() => undefined)
-            recordStageFailure(502, `Upstream timed out after ${firstChunkTimeoutMs / 1000}s without sending chunks`)
-            if (advanceToNextStage()) continue
-          } else {
-            const firstRead = raceResult as { done: boolean; value?: Uint8Array }
+
+          if (!upstream.ok) {
+            const errorBody = (await upstream.json().catch(() => ({}))) as Record<string, unknown>
+            recordStageFailure(upstream.status, extractErrorMessage(errorBody, upstream.status))
+
+            if (
+              !outputLimitRetried &&
+              attempt < maxAttempts &&
+              isOutputLimitCompatibilityError(upstream.status, lastError) &&
+              removeOutputLimitsForFreeRetry(payload, freeModel)
+            ) {
+              outputLimitRetried = true
+              continue
+            }
+
+            if (upstream.status === 401 || upstream.status === 402 || upstream.status === 403) {
+              markProviderSecretFailed(providerSecret, lastError, upstream.status)
+              // Do not retry another endpoint with a permanently failed key.
+              while (attempt < maxAttempts && attemptPlan[attempt].secret === providerSecret) attempt += 1
+            }
+
+            const canRotate =
+              attempt < maxAttempts &&
+              (isUpstreamTransient(upstream.status, lastError) ||
+                // A backend-variant 400 is worth one more key on the same provider
+                // before handing a free request to a paid fallback.
+                (attemptPlan[attempt]?.stage === stage &&
+                  isProviderVariantRetryableError(stage.provider, upstream.status, lastError)) ||
+                upstream.status === 401 ||
+                upstream.status === 402 ||
+                upstream.status === 403)
+            if (canRotate) {
+              // Longer backoff when upstream asks "Retry in Ns". A fallback upstream is
+              // tried immediately: waiting on a rate-limited provider helps nobody.
+              const nextIsSameStage = attemptPlan[attempt]?.stage === stage
+              if (nextIsSameStage) {
+                const retryMatch = lastError.match(/retry in\s+(\d+)/i)
+                const hinted = retryMatch ? Number(retryMatch[1]) * 1000 : 0
+                const waitMs = Math.min(Math.max(hinted || 350 * attempt, 250), 4000)
+                await sleep(waitMs)
+              }
+              continue
+            }
+
+            // If upstream failed with 400 because of an invalid client request
+            // Return the client error directly to save paid fallback balance.
+            const isClientInvalidParamError =
+              upstream.status === 400 &&
+              (lastError.includes('不支持关闭思考') || lastError.includes('始终思考'))
+
+            // A definitive upstream failure (for example a model id the primary no
+            // longer serves) still fails over when another upstream is configured.
+            if (!isClientInvalidParamError && advanceToNextStage()) continue
+
+            recordUsage({
+              userId: auth.user.id,
+              apiKeyId: auth.key.id,
+              modelId: model.id,
+              provider: model.provider,
+              inputTokens: 0,
+              outputTokens: 0,
+              costTokens: 0,
+              latencyMs: Date.now() - started,
+              status: 'error',
+              reservationId: reservation.reservationId,
+            })
+            const responseStatus =
+              publicModelId === 'free/gpt-6-astra' ||
+              upstream.status === 401 ||
+              upstream.status === 402 ||
+              upstream.status === 403
+                ? 503
+                : upstream.status >= 400 && upstream.status < 600
+                  ? upstream.status
+                  : 502
+            const publicError = publicModelId === 'free/gpt-6-astra'
+              ? 'Model temporarily unavailable'
+              : clientSafeUpstreamError(responseStatus, lastError)
+            return sendError(responseStatus, publicError, 'api_error')
+          }
+
+          if (stream) {
+            // If the upstream yielded 200 OK headers but has not sent any body chunks
+            // within the timeout window, and we have fallbacks available, advance to next key/provider!
+            const firstChunkTimeoutMs = UPSTREAM_STREAM_FIRST_CHUNK_TIMEOUT_MS
+            if (stages.indexOf(stage) < stages.length - 1 && upstream.body) {
+              const reader = upstream.body.getReader()
+              const firstChunkPromise = reader.read()
+              const timerPromise = new Promise<{ timeout: true }>((resolve) =>
+                setTimeout(() => resolve({ timeout: true }), firstChunkTimeoutMs),
+              )
+              const raceResult = await Promise.race([firstChunkPromise, timerPromise])
+              if ('timeout' in raceResult && raceResult.timeout) {
+                void reader.cancel().catch(() => undefined)
+                recordStageFailure(502, `Upstream timed out after ${firstChunkTimeoutMs / 1000}s without sending chunks`)
+                if (advanceToNextStage()) continue
+              } else {
+                const firstRead = raceResult as { done: boolean; value?: Uint8Array }
+                reservationSettled = true
+                return await pipeStreamingCompletion({
+                  reply,
+                  upstream,
+                  auth,
+                  model,
+                  publicModelId,
+                  body,
+                  started,
+                  reservationId: reservation.reservationId,
+                  playground,
+                  responseStyle:
+                    path === 'messages'
+                      ? 'anthropic'
+                      : stage.emulateResponses
+                        ? 'responses-emulated'
+                        : path === 'responses'
+                          ? 'responses-native'
+                          : 'openai',
+                  initialChunk: firstRead.value ?? undefined,
+                  initialDone: firstRead.done,
+                  existingReader: reader,
+                })
+              }
+            }
+
+            reservationSettled = true
             return await pipeStreamingCompletion({
               reply,
               upstream,
@@ -2145,156 +2256,149 @@ async function proxyModelRequest(input: {
                     : path === 'responses'
                       ? 'responses-native'
                       : 'openai',
-              initialChunk: firstRead.value ?? undefined,
-              initialDone: firstRead.done,
-              existingReader: reader,
             })
           }
+
+          const data = (await upstream.json()) as Record<string, unknown>
+          stripUpstreamVendorFields(data)
+          if (
+            !reasoningExhaustionRetried &&
+            isReasoningExhaustedResponse(data) &&
+            raiseReasoningOutputLimit(payload)
+          ) {
+            reasoningExhaustionRetried = true
+            // Do not record/bill a zero-content response and do not advance to fallback.
+            attempt -= 1
+            continue
+          }
+          const billed = resolveBillableUsage({
+            body,
+            data,
+            parsed: parseUsage(data),
+            rates,
+            freeModel,
+          })
+
+          recordUsage({
+            userId: auth.user.id,
+            apiKeyId: auth.key.id,
+            allowanceWeight: freeModel ? freeAllowanceWeight(auth.user.id, model) : 0,
+            modelId: model.id,
+            provider: model.provider,
+            inputTokens: billed.inputTokens,
+            outputTokens: billed.outputTokens,
+            costTokens: billed.costTokens,
+            latencyMs: Date.now() - started,
+            status: 'ok',
+            reservationId: reservation.reservationId,
+          })
+          reservationSettled = true
+
+          if (freeModel && data.choices && Array.isArray(data.choices)) {
+            for (const choice of data.choices as Array<Record<string, unknown>>) {
+              const msg = choice.message as Record<string, unknown> | undefined
+              // Free tier hides the model's chain-of-thought entirely: drop every
+              // reasoning field the upstream attached (reasoning, reasoning_content,
+              // reasoning_details, thinking, thinking_signature) so callers never
+              // see internal thinking.
+              if (msg) {
+                delete msg.reasoning
+                delete msg.reasoning_content
+                delete msg.reasoning_details
+                delete msg.thinking
+                delete msg.thinking_signature
+              }
+            }
+          }
+
+          if (path === 'messages') {
+            return toAnthropicMessageResponse(data, publicModelId, billed)
+          }
+
+          // A chat-only upstream served a Responses request: hand the caller the
+          // Responses shape it expects.
+          if (stage.emulateResponses) {
+            return chatResponseToResponses(data, publicModelId, billed)
+          }
+
+          delete (data as Record<string, unknown>)._manifest
+
+          const usage = publicUsage(data.usage, billed.costTokens, {
+            inputTokens: billed.inputTokens,
+            outputTokens: billed.outputTokens,
+          })
+          return {
+            ...data,
+            usage,
+            model: publicModelId,
+            ...(playground
+              ? {
+                  usageMeta: {
+                    free: freeModel,
+                    costTokens: freeModel
+                      ? chargeTokens(billed.inputTokens, billed.outputTokens, freeAllowanceWeight(auth.user.id, model))
+                      : billed.costTokens,
+                    chargedUsd: freeModel ? null : usdFromTokens(billed.costTokens),
+                    latencyMs: Date.now() - started,
+                  },
+                }
+              : {}),
+          }
+        } catch (reason) {
+          const failure = upstreamFailureMessage(reason, payload, hasLaterStage, stage.provider)
+          recordStageFailure(502, failure)
+          const timedOut =
+            reason instanceof DOMException &&
+            (reason.name === 'TimeoutError' || reason.name === 'AbortError')
+
+          // A header timeout is a stall, not a bad key. When another provider is
+          // already queued, skip the rest of this stage so the caller is not billed
+          // another full timeout on the same pool.
+          if (timedOut && hasLaterStage && advanceToNextStage()) continue
+          if (attempt < maxAttempts) {
+            await sleep(300 * Math.min(attempt, 3))
+            continue
+          }
         }
-
-        return await pipeStreamingCompletion({
-          reply,
-          upstream,
-          auth,
-          model,
-          publicModelId,
-          body,
-          started,
-          reservationId: reservation.reservationId,
-          playground,
-          responseStyle:
-            path === 'messages'
-              ? 'anthropic'
-              : stage.emulateResponses
-                ? 'responses-emulated'
-                : path === 'responses'
-                  ? 'responses-native'
-                  : 'openai',
-        })
       }
-
-      const data = (await upstream.json()) as Record<string, unknown>
-      stripUpstreamVendorFields(data)
-      if (
-        !reasoningExhaustionRetried &&
-        isReasoningExhaustedResponse(data) &&
-        raiseReasoningOutputLimit(payload)
-      ) {
-        reasoningExhaustionRetried = true
-        // Do not record/bill a zero-content response and do not advance to fallback.
-        attempt -= 1
-        continue
-      }
-      const billed = resolveBillableUsage({
-        body,
-        data,
-        parsed: parseUsage(data),
-        rates,
-        freeModel,
-      })
 
       recordUsage({
         userId: auth.user.id,
         apiKeyId: auth.key.id,
-        allowanceWeight: freeModel ? freeAllowanceWeight(auth.user.id, model) : 0,
         modelId: model.id,
         provider: model.provider,
-        inputTokens: billed.inputTokens,
-        outputTokens: billed.outputTokens,
-        costTokens: billed.costTokens,
+        inputTokens: 0,
+        outputTokens: 0,
+        costTokens: 0,
         latencyMs: Date.now() - started,
-        status: 'ok',
+        status: 'error',
         reservationId: reservation.reservationId,
       })
 
-      if (freeModel && data.choices && Array.isArray(data.choices)) {
-        for (const choice of data.choices as Array<Record<string, unknown>>) {
-          const msg = choice.message as Record<string, unknown> | undefined
-          // Free tier hides the model's chain-of-thought entirely: drop every
-          // reasoning field the upstream attached (reasoning, reasoning_content,
-          // reasoning_details, thinking, thinking_signature) so callers never
-          // see internal thinking.
-          if (msg) {
-            delete msg.reasoning
-            delete msg.reasoning_content
-            delete msg.reasoning_details
-            delete msg.thinking
-            delete msg.thinking_signature
-          }
-        }
-      }
-
-      if (path === 'messages') {
-        return toAnthropicMessageResponse(data, publicModelId, billed)
-      }
-
-      // A chat-only upstream served a Responses request: hand the caller the
-      // Responses shape it expects.
-      if (stage.emulateResponses) {
-        return chatResponseToResponses(data, publicModelId, billed)
-      }
-
-      delete (data as Record<string, unknown>)._manifest
-
-      const usage = publicUsage(data.usage, billed.costTokens, {
-        inputTokens: billed.inputTokens,
-        outputTokens: billed.outputTokens,
-      })
-      return {
-        ...data,
-        usage,
-        model: publicModelId,
-        ...(playground
-          ? {
-              usageMeta: {
-                free: freeModel,
-                costTokens: freeModel
-                  ? chargeTokens(billed.inputTokens, billed.outputTokens, freeAllowanceWeight(auth.user.id, model))
-                  : billed.costTokens,
-                chargedUsd: freeModel ? null : usdFromTokens(billed.costTokens),
-                latencyMs: Date.now() - started,
-              },
-            }
-          : {}),
-      }
-    } catch (reason) {
-      const failure = upstreamFailureMessage(reason, payload, hasLaterStage, stage.provider)
-      recordStageFailure(502, failure)
-      const timedOut =
-        reason instanceof DOMException &&
-        (reason.name === 'TimeoutError' || reason.name === 'AbortError')
-
-
-      // A header timeout is a stall, not a bad key. When another provider is
-      // already queued, skip the rest of this stage so the caller is not billed
-      // another full timeout on the same pool.
-      if (timedOut && hasLaterStage && advanceToNextStage()) continue
-      if (attempt < maxAttempts) {
-        await sleep(300 * Math.min(attempt, 3))
-        continue
+      const finalStatus =
+        publicModelId === 'free/gpt-6-astra' || lastStatus === 401 || lastStatus === 402 || lastStatus === 403
+          ? 503
+          : lastStatus >= 400 && lastStatus < 600
+            ? lastStatus
+            : 502
+      const publicError =
+        publicModelId === 'free/gpt-6-astra'
+          ? 'Model temporarily unavailable'
+          : clientSafeUpstreamError(finalStatus, lastError)
+      return sendError(finalStatus, publicError, 'api_error')
+    } finally {
+      releaseDispatchSlot()
+    }
+  } finally {
+    request.raw.off('close', onClientClose)
+    reply.raw.off('close', onClientClose)
+    if (!reservationSettled) {
+      try {
+        releaseReservation(reservation.reservationId)
+      } catch {
+        /* ignore */
       }
     }
-  }
-
-  recordUsage({
-    userId: auth.user.id,
-    apiKeyId: auth.key.id,
-    modelId: model.id,
-    provider: model.provider,
-    inputTokens: 0,
-    outputTokens: 0,
-    costTokens: 0,
-    latencyMs: Date.now() - started,
-    status: 'error',
-    reservationId: reservation.reservationId,
-  })
-    return sendError(
-    publicModelId === 'free/gpt-6-astra' ? 503 : lastStatus,
-    publicModelId === 'free/gpt-6-astra' ? 'Model temporarily unavailable' : `${lastError} (after ${attempt} attempts)`,
-    'api_error',
-  )
-  } finally {
-    releaseDispatchSlot()
   }
 }
 
@@ -2423,30 +2527,34 @@ export async function registerGatewayRoutes(app: FastifyInstance) {
     }
   })
 
-  app.post('/v1/chat/completions', async (request, reply) =>
+  const GATEWAY_ROUTE_OPTIONS = {
+    bodyLimit: 20 * 1024 * 1024,
+  }
+
+  app.post('/v1/chat/completions', GATEWAY_ROUTE_OPTIONS, async (request, reply) =>
     proxyModelRequest({ request, reply, path: 'chat/completions', errorStyle: 'openai' }),
   )
 
-  app.post('/v1/chat/completions/playground', async (request, reply) =>
+  app.post('/v1/chat/completions/playground', GATEWAY_ROUTE_OPTIONS, async (request, reply) =>
     proxyModelRequest({ request, reply, path: 'chat/completions', errorStyle: 'openai', playground: true }),
   )
 
   // Claude Code / Anthropic-compatible clients
-  app.post('/v1/messages', async (request, reply) =>
+  app.post('/v1/messages', GATEWAY_ROUTE_OPTIONS, async (request, reply) =>
     proxyModelRequest({ request, reply, path: 'messages', errorStyle: 'anthropic' }),
   )
 
   // Codex (wire_api = "responses") and OpenAI Responses API clients
-  app.post('/v1/responses', async (request, reply) =>
+  app.post('/v1/responses', GATEWAY_ROUTE_OPTIONS, async (request, reply) =>
     proxyModelRequest({ request, reply, path: 'responses', errorStyle: 'openai' }),
   )
 
   // Jev Group Decisions API (TypeSafe / SubQ / OpenAI Decisions shapes)
-  app.post('/v1/decisions', async (request, reply) =>
+  app.post('/v1/decisions', GATEWAY_ROUTE_OPTIONS, async (request, reply) =>
     proxyDecisionRequest({ request, reply }),
   )
 
-  app.post('/v1/decisions/playground', async (request, reply) =>
+  app.post('/v1/decisions/playground', GATEWAY_ROUTE_OPTIONS, async (request, reply) =>
     proxyDecisionRequest({ request, reply, playground: true }),
   )
 }
@@ -2570,22 +2678,25 @@ function resolveDecisionModel(publicId: string): ModelRow | undefined {
 }
 
 function normalizeOpenAiDecisionQuestions(questions: unknown[]): unknown[] {
-  return questions.map((q) => {
-    if (!q || typeof q !== 'object') return q
-    const row = { ...(q as Record<string, unknown>) }
-    if (row.type === 'score' && Array.isArray(row.levels)) {
-      row.levels = row.levels.map((lvl) => {
-        if (!lvl || typeof lvl !== 'object') return lvl
-        const lRow = { ...(lvl as Record<string, unknown>) }
-        if (!('label' in lRow) && 'value' in lRow) {
-          lRow.label = String(lRow.value)
-          delete lRow.value
-        }
-        return lRow
-      })
-    }
-    return row
-  })
+  if (!Array.isArray(questions)) return []
+  return questions
+    .filter((q): q is Record<string, unknown> => Boolean(q && typeof q === 'object'))
+    .map((q) => {
+      const row = { ...q }
+      if (row.type === 'score' && Array.isArray(row.levels)) {
+        row.levels = row.levels
+          .filter((lvl): lvl is Record<string, unknown> => Boolean(lvl && typeof lvl === 'object'))
+          .map((lvl) => {
+            const lRow = { ...lvl }
+            if (!('label' in lRow) && 'value' in lRow) {
+              lRow.label = String(lRow.value)
+              delete lRow.value
+            }
+            return lRow
+          })
+      }
+      return row
+    })
 }
 
 function normalizeTypeSafeDecisionQuestions(
@@ -2804,7 +2915,10 @@ async function proxyDecisionRequest(input: {
   }
 
   const body = (request.body ?? {}) as Record<string, unknown>
-  const publicModelId = String(body.model ?? '').trim()
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return sendError(400, 'Invalid request body, expected a JSON object', 'invalid_request_error')
+  }
+  const publicModelId = typeof body.model === 'string' ? body.model.trim() : ''
   if (!publicModelId) {
     return sendError(400, 'model is required', 'invalid_request_error')
   }
@@ -2826,6 +2940,13 @@ async function proxyDecisionRequest(input: {
       'invalid_request_error',
     )
   }
+
+  if (!('input' in body) && !('state' in body) && !('questions' in body) && !('messages' in body)) {
+    return sendError(400, 'Invalid decision request: input, state, questions, or messages is required', 'invalid_request_error')
+  }
+
+  const inputLimitError = validateModelInputLimits(body, [publicModelId, upstreamModelId])
+  if (inputLimitError) return sendError(400, inputLimitError, 'invalid_request_error')
 
   const freeModel = model.provider.trim().toLowerCase() === 'free' || model.id.startsWith('free/')
   const limited = enforceGatewayRateLimit(request, reply, auth, sendError, {
@@ -2901,6 +3022,15 @@ async function proxyDecisionRequest(input: {
     }
   }
 
+  const clientAbortController = new AbortController()
+  const onClientClose = () => {
+    if (!reply.raw.writableEnded) {
+      clientAbortController.abort()
+    }
+  }
+  request.raw.on('close', onClientClose)
+  reply.raw.on('close', onClientClose)
+
   const reservation = tryReserveTokens({
     userId: auth.user.id,
     apiKeyId: auth.key.id,
@@ -2912,117 +3042,135 @@ async function proxyDecisionRequest(input: {
     modelId: model.id,
     path: '/v1/decisions',
     allowRestrictedCredits: true,
+    signal: clientAbortController.signal,
   })
   if (!reservation.ok) {
+    request.raw.off('close', onClientClose)
+    reply.raw.off('close', onClientClose)
     return sendError(reservation.status, reservation.error, 'billing_error')
   }
 
-  const payload = buildDecisionPayload(body, upstreamModelId)
-  const baseUrls = baseUrlsForUpstream('apinex')
-  let lastStatus = 502
-  let lastError = 'Upstream decision request failed'
+  let reservationSettled = false
+  try {
+    const payload = buildDecisionPayload(body, upstreamModelId)
+    const baseUrls = baseUrlsForUpstream('apinex')
+    let lastStatus = 502
+    let lastError = 'Upstream decision request failed'
 
-  for (let i = 0; i < targets.length; i += 1) {
-    const target = targets[i]!
-    const baseUrl = baseUrls[i % baseUrls.length]!
-    try {
-      const upstream = await upstreamPost(
-        baseUrl,
-        'decisions',
-        target.secret,
-        payload,
-        dispatcherForProxyIndex(target.proxyIndex ?? null),
-        undefined,
-        i < targets.length - 1,
-        'apinex',
-      )
+    for (let i = 0; i < targets.length; i += 1) {
+      const target = targets[i]!
+      const baseUrl = baseUrls[i % baseUrls.length]!
+      try {
+        const upstream = await upstreamPost(
+          baseUrl,
+          'decisions',
+          target.secret,
+          payload,
+          dispatcherForProxyIndex(target.proxyIndex ?? null),
+          undefined,
+          i < targets.length - 1,
+          'apinex',
+          clientAbortController.signal,
+        )
 
-      if (!upstream.ok) {
-        const errorBody = (await upstream.json().catch(() => ({}))) as Record<string, unknown>
-        lastStatus = upstream.status
-        lastError = extractErrorMessage(errorBody, upstream.status)
-        if (upstream.status === 401 || upstream.status === 402 || upstream.status === 403) {
-          markProviderSecretFailed(target.secret, lastError, upstream.status)
-          continue
+        if (!upstream.ok) {
+          const errorBody = (await upstream.json().catch(() => ({}))) as Record<string, unknown>
+          lastStatus = upstream.status
+          lastError = extractErrorMessage(errorBody, upstream.status)
+          if (upstream.status === 401 || upstream.status === 402 || upstream.status === 403) {
+            markProviderSecretFailed(target.secret, lastError, upstream.status)
+            continue
+          }
+          if (isUpstreamTransient(upstream.status, lastError) && i < targets.length - 1) {
+            continue
+          }
+          break
         }
-        if (isUpstreamTransient(upstream.status, lastError) && i < targets.length - 1) {
-          continue
+
+        const data = (await upstream.json()) as Record<string, unknown>
+        stripUpstreamVendorFields(data)
+
+        const billed = resolveBillableUsage({
+          body,
+          data,
+          parsed: parseUsage(data),
+          rates,
+          freeModel,
+        })
+
+        recordUsage({
+          userId: auth.user.id,
+          apiKeyId: auth.key.id,
+          allowanceWeight: freeModel ? 1 : 0,
+          modelId: model.id,
+          provider: model.provider,
+          inputTokens: billed.inputTokens,
+          outputTokens: billed.outputTokens,
+          costTokens: billed.costTokens,
+          latencyMs: Date.now() - started,
+          status: 'ok',
+          reservationId: reservation.reservationId,
+        })
+        reservationSettled = true
+
+        const usage = publicUsage(data.usage, billed.costTokens, {
+          inputTokens: billed.inputTokens,
+          outputTokens: billed.outputTokens,
+        })
+
+        return {
+          ...data,
+          model: publicModelId,
+          usage,
+          ...(playground
+            ? {
+                usageMeta: {
+                  free: freeModel,
+                  costTokens: freeModel
+                    ? chargeTokens(billed.inputTokens, billed.outputTokens, 1)
+                    : billed.costTokens,
+                  chargedUsd: freeModel ? null : usdFromTokens(billed.costTokens),
+                  latencyMs: Date.now() - started,
+                },
+              }
+            : {}),
         }
-        break
+      } catch (reason) {
+        lastStatus = 502
+        lastError = upstreamFailureMessage(reason, payload, i < targets.length - 1, 'apinex')
       }
+    }
 
-      const data = (await upstream.json()) as Record<string, unknown>
-      stripUpstreamVendorFields(data)
-
-      const billed = resolveBillableUsage({
-        body,
-        data,
-        parsed: parseUsage(data),
-        rates,
-        freeModel,
-      })
-
-      recordUsage({
-        userId: auth.user.id,
-        apiKeyId: auth.key.id,
-        allowanceWeight: freeModel ? 1 : 0,
-        modelId: model.id,
-        provider: model.provider,
-        inputTokens: billed.inputTokens,
-        outputTokens: billed.outputTokens,
-        costTokens: billed.costTokens,
-        latencyMs: Date.now() - started,
-        status: 'ok',
-        reservationId: reservation.reservationId,
-      })
-
-      const usage = publicUsage(data.usage, billed.costTokens, {
-        inputTokens: billed.inputTokens,
-        outputTokens: billed.outputTokens,
-      })
-
-      return {
-        ...data,
-        model: publicModelId,
-        usage,
-        ...(playground
-          ? {
-              usageMeta: {
-                free: freeModel,
-                costTokens: freeModel
-                  ? chargeTokens(billed.inputTokens, billed.outputTokens, 1)
-                  : billed.costTokens,
-                chargedUsd: freeModel ? null : usdFromTokens(billed.costTokens),
-                latencyMs: Date.now() - started,
-              },
-            }
-          : {}),
+    recordUsage({
+      userId: auth.user.id,
+      apiKeyId: auth.key.id,
+      modelId: model.id,
+      provider: model.provider,
+      inputTokens: 0,
+      outputTokens: 0,
+      costTokens: 0,
+      latencyMs: Date.now() - started,
+      status: 'error',
+      reservationId: reservation.reservationId,
+    })
+    const responseStatus =
+      lastStatus === 401 || lastStatus === 402 || lastStatus === 403
+        ? 503
+        : lastStatus >= 400 && lastStatus < 600
+          ? lastStatus
+          : 502
+    return sendError(responseStatus, clientSafeUpstreamError(responseStatus, lastError), 'api_error')
+  } finally {
+    request.raw.off('close', onClientClose)
+    reply.raw.off('close', onClientClose)
+    if (!reservationSettled) {
+      try {
+        releaseReservation(reservation.reservationId)
+      } catch {
+        /* ignore */
       }
-    } catch (reason) {
-      lastStatus = 502
-      lastError = upstreamFailureMessage(reason, payload, i < targets.length - 1, 'apinex')
     }
   }
-
-  recordUsage({
-    userId: auth.user.id,
-    apiKeyId: auth.key.id,
-    modelId: model.id,
-    provider: model.provider,
-    inputTokens: 0,
-    outputTokens: 0,
-    costTokens: 0,
-    latencyMs: Date.now() - started,
-    status: 'error',
-    reservationId: reservation.reservationId,
-  })
-  const responseStatus =
-    lastStatus === 401 || lastStatus === 402 || lastStatus === 403
-      ? 503
-      : lastStatus >= 400 && lastStatus < 600
-        ? lastStatus
-        : 502
-  return sendError(responseStatus, clientSafeUpstreamError(responseStatus, lastError), 'api_error')
 }
 
 /**
@@ -3103,8 +3251,14 @@ async function pipeStreamingCompletion(input: {
   if (!reader) {
     reply.raw.end()
     recordUsage({ userId: auth.user.id, apiKeyId: auth.key.id, modelId: model.id, provider: model.provider, inputTokens: 0, outputTokens: 0, costTokens: 0, latencyMs: Date.now() - started, status: 'error', reservationId })
-        return
+    return
   }
+
+  let streamFinished = false
+  const onStreamDisconnect = () => {
+    try { void reader.cancel().catch(() => {}) } catch { /* ignore */ }
+  }
+  reply.raw.on('close', onStreamDisconnect)
 
   const streamRates = modelRates(model)
   const writeAnthropicEvent = (event: string, data: Record<string, unknown>) => {
@@ -3356,6 +3510,7 @@ async function pipeStreamingCompletion(input: {
         })}\n\n`,
       )
     }
+    streamFinished = true
     reply.raw.end()
   } catch (reason) {
     // The client is already committed to a 200 SSE stream, so the wire behaviour
@@ -3363,11 +3518,17 @@ async function pipeStreamingCompletion(input: {
     // the operator alert differ.
     const clientGone = isClientDisconnect(reason, reply.raw)
     try { reply.raw.end() } catch { /* ignore */ }
+    try { void reader.cancel().catch(() => {}) } catch { /* ignore */ }
     recordUsage({ userId: auth.user.id, apiKeyId: auth.key.id, modelId: model.id, provider: model.provider, inputTokens: 0, outputTokens: 0, costTokens: 0, latencyMs: Date.now() - started, status: 'error', clientDisconnected: clientGone, reservationId })
     // A cancelled request is normal IDE behaviour, not an incident.
     if (!clientGone) {
-          }
+    }
     return
+  } finally {
+    reply.raw.off('close', onStreamDisconnect)
+    if (!streamFinished) {
+      try { void reader.cancel().catch(() => {}) } catch { /* ignore */ }
+    }
   }
 
   const billed = resolveBillableUsage({ body, parsed: sawUsage ? { inputTokens, outputTokens } : { inputTokens: 0, outputTokens: 0 }, rates: streamRates, freeModel: model.provider.trim().toLowerCase() === 'free' })

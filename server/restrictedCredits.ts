@@ -28,33 +28,6 @@ function ensureRestrictedCreditsSchema() {
   if (!reservationCols.some((column) => column.name === 'restricted_credits_allowed')) {
     db.exec('ALTER TABLE token_reservations ADD COLUMN restricted_credits_allowed INTEGER NOT NULL DEFAULT 1')
   }
-
-  // Ensure users who claimed telegram bonus without a top-up have their bonus tokens marked as restricted
-  const tableExists = (name: string) =>
-    Boolean(db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`).get(name))
-
-  if (tableExists('users')) {
-    const subQuery = tableExists('subscription_payments')
-      ? `UNION SELECT user_id FROM subscription_payments WHERE credited_at IS NOT NULL OR lower(status) IN ('finished', 'confirmed')`
-      : ''
-    const btQuery = tableExists('balance_transactions')
-      ? `UNION SELECT user_id FROM balance_transactions WHERE type IN ('top_up', 'adjustment') AND (amount_cents > 0 OR amount_tokens > 0) AND status = 'completed'`
-      : ''
-    const cryptoQuery = tableExists('crypto_payments')
-      ? `SELECT user_id FROM crypto_payments WHERE credited_at IS NOT NULL OR lower(status) IN ('finished', 'confirmed')`
-      : 'SELECT id AS user_id FROM users WHERE 0'
-
-    db.exec(`
-      UPDATE users
-      SET restricted_tokens = MAX(COALESCE(restricted_tokens, 0), MIN(balance_tokens, 400000))
-      WHERE telegram_bonus_claimed_at IS NOT NULL
-        AND id NOT IN (
-          ${cryptoQuery}
-          ${btQuery}
-          ${subQuery}
-        )
-    `)
-  }
 }
 
 ensureRestrictedCreditsSchema()

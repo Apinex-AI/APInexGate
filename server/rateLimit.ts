@@ -105,8 +105,6 @@ const SHORT = 90_000
 
 export const RL = {
   adminLoginIp: { limit: 4, windowMs: SHORT },
-  /** Browser polls /api/auth/login/status every ~2s while waiting for Telegram. */
-  adminLoginStatusIp: { limit: 80, windowMs: SHORT },
   loginIp: { limit: 5, windowMs: SHORT },
   loginEmail: { limit: 4, windowMs: SHORT },
   registerIp: { limit: 4, windowMs: SHORT },
@@ -119,8 +117,6 @@ export const RL = {
   challengeIp: { limit: 40, windowMs: SHORT },
   logoutIp: { limit: 8, windowMs: SHORT },
   keysCreateUser: { limit: 4, windowMs: SHORT },
-  /** Telegram deep-link minting: 6 / min per user. */
-  telegramLinkUser: { limit: 6, windowMs: 60_000 },
   /** Promo redeem attempts: 8 / 90s per user. */
   promoRedeemUser: { limit: 8, windowMs: SHORT },
   /** Voucher redeem attempts: anti-bruteforce protection for G2G codes. */

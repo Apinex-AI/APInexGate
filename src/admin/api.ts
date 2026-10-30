@@ -35,13 +35,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return data
 }
 
-export type AdminLoginResponse =
-  | { pending: false; user: AdminUser; expiresAt: string }
-  | { pending: true; requestId: string; expiresAt: string; message?: string }
-
-export type AdminLoginStatusResponse =
-  | { status: 'pending' | 'denied' | 'expired' | 'consumed' }
-  | { status: 'approved'; user: AdminUser; expiresAt: string }
+export type AdminLoginResponse = { user: AdminUser; expiresAt: string }
 
 export const adminApi = {
   me: () => request<{ user: AdminUser; expiresAt: string }>('/api/auth/me'),
@@ -67,10 +61,6 @@ export const adminApi = {
       method: 'POST',
       body: JSON.stringify({ password }),
     }),
-  loginStatus: (requestId: string) =>
-    request<AdminLoginStatusResponse>(
-      `/api/auth/login/status?requestId=${encodeURIComponent(requestId)}`,
-    ),
   overview: () => request<AdminOverview>('/api/admin/overview'),
   users: (params?: { limit?: number; offset?: number; q?: string; sort?: string; dir?: 'asc' | 'desc' }) => {
     const query = new URLSearchParams()

@@ -57,8 +57,14 @@ function textCharCount(value: unknown): number {
  */
 export function validateModelInputLimits(body: Record<string, unknown>, modelIds: readonly string[]) {
   const maxAllowed = isLunaModel(modelIds) ? LUNA_MAX_INPUT_TOKENS : DEFAULT_MAX_INPUT_TOKENS
-  const input = body.messages ?? body.input ?? body.prompt ?? ''
-  const estimatedTokens = Math.ceil(textCharCount(input) / 4)
+  const inputChars =
+    textCharCount(body.messages) +
+    textCharCount(body.input) +
+    textCharCount(body.prompt) +
+    textCharCount(body.state) +
+    textCharCount(body.system) +
+    (body.questions ? (typeof body.questions === 'string' ? body.questions.length : JSON.stringify(body.questions).length) : 0)
+  const estimatedTokens = Math.ceil(inputChars / 4)
   if (estimatedTokens > maxAllowed) {
     return `The request is too large for this model. Shorten the conversation to stay within its ${maxAllowed.toLocaleString('en-US')}-token input limit.`
   }

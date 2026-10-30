@@ -6,6 +6,19 @@ import {
 } from '../shared/providers.js'
 import { isFreeWeight } from '../shared/billing.js'
 import { proxiedFetch } from './providerProxy.js'
+import {
+  displayNameFromId,
+  isValidModelId,
+  isValidModelName,
+  sanitizeModelName,
+} from '../shared/modelValidation.js'
+
+export {
+  displayNameFromId,
+  isValidModelId,
+  isValidModelName,
+  sanitizeModelName,
+}
 
 export const APINEX_BASE_URL = 'https://api.apinex.bond/v1'
 export const APINEX_PUBLIC_MODELS_URL = 'https://apinex.bond/api/public/models'
@@ -684,14 +697,6 @@ export const APINEX_CATALOG_DEFAULTS: Record<string, ApinexCatalogSpec> = {
   'free/kimi-k2.8': { name: 'Kimi K2.8', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
 }
 
-export function displayNameFromId(modelId: string) {
-  const leaf = modelId.includes('/') ? modelId.slice(modelId.lastIndexOf('/') + 1) : modelId
-  return leaf
-    .split('-')
-    .map((part) => (part.length <= 2 ? part.toUpperCase() : part.charAt(0).toUpperCase() + part.slice(1)))
-    .join(' ')
-}
-
 async function fetchApinexPublicMetadata(proxyIndex: number | null = null): Promise<Map<string, ApinexCatalogSpec>> {
   const map = new Map<string, ApinexCatalogSpec>(Object.entries(APINEX_CATALOG_DEFAULTS))
   try {
@@ -717,7 +722,7 @@ async function fetchApinexPublicMetadata(proxyIndex: number | null = null): Prom
     }
     for (const item of payload.models ?? []) {
       const modelId = String(item.id ?? '').trim()
-      if (!modelId) continue
+      if (!modelId || !isValidModelId(modelId)) continue
       const isFree = modelId.startsWith('free/') || String(item.provider ?? '').trim().toLowerCase() === 'free'
       const rawProvider = String(item.provider ?? '').trim()
       const provider: ModelCategory = isFree
@@ -743,8 +748,9 @@ async function fetchApinexPublicMetadata(proxyIndex: number | null = null): Prom
           : isJev
             ? 0
             : resolvedInput
+      const safeName = sanitizeModelName(item.name, modelId)
       map.set(modelId, {
-        name: String(item.name ?? '').trim() || displayNameFromId(modelId),
+        name: safeName,
         provider,
         contextWindow: String(item.contextWindow ?? '').trim() || '1M',
         dollarsPer1M: resolvedInput,
@@ -810,7 +816,7 @@ export async function fetchCatalogModels(
       const seen = new Set<string>()
       for (const item of payload.data ?? []) {
         const modelId = String(item.id ?? '').trim()
-        if (!modelId || seen.has(modelId)) continue
+        if (!modelId || seen.has(modelId) || !isValidModelId(modelId)) continue
         seen.add(modelId)
         const spec = publicMeta.get(modelId)
         const isFree = modelId.startsWith('free/') || spec?.provider === 'Free'
@@ -821,9 +827,11 @@ export async function fetchCatalogModels(
             : (spec?.provider ?? familyFromUpstreamId(modelId) ?? 'GPT')
         const price = spec?.dollarsPer1M ?? (isFree ? 0 : 0.1)
         const outPrice = spec?.outputDollarsPer1M !== undefined ? spec.outputDollarsPer1M : (resolvedProvider === 'Jev Group' ? 0 : price)
+        const rawName = String(item.name ?? '').trim() || spec?.name || displayNameFromId(modelId)
+        const safeName = sanitizeModelName(rawName, modelId)
         models.push({
           id: modelId,
-          name: String(item.name ?? '').trim() || spec?.name || displayNameFromId(modelId),
+          name: safeName,
           provider: resolvedProvider,
           contextWindow: item.context_window ? String(item.context_window) : (spec?.contextWindow ?? '1M'),
           inputPrice: price,
@@ -832,11 +840,12 @@ export async function fetchCatalogModels(
         })
       }
       for (const [modelId, spec] of publicMeta.entries()) {
-        if (seen.has(modelId)) continue
+        if (seen.has(modelId) || !isValidModelId(modelId)) continue
         seen.add(modelId)
+        const safeName = sanitizeModelName(spec.name, modelId)
         models.push({
           id: modelId,
-          name: spec.name,
+          name: safeName,
           provider: spec.provider,
           contextWindow: spec.contextWindow,
           inputPrice: spec.dollarsPer1M,
@@ -897,6 +906,8 @@ export async function importApinexCatalogModels(): Promise<{
 
   const tx = db.transaction((items: CatalogModel[]) => {
     for (const item of items) {
+      if (!isValidModelId(item.id)) continue
+      const safeName = sanitizeModelName(item.name, item.id)
       const isFree = item.provider === 'Free' || item.id.startsWith('free/')
       const isJev = !isFree && (item.provider === 'Jev Group' || isDecisionCatalogModelId(item.id))
       const storedProvider = isFree ? 'Free' : isJev ? 'Jev Group' : item.provider
@@ -929,7 +940,7 @@ export async function importApinexCatalogModels(): Promise<{
         insertModel.run(
           item.id,
           storedProvider,
-          item.name,
+          safeName,
           contextWindow,
           inputMicros,
           outputMicros,
@@ -955,7 +966,7 @@ export async function importApinexCatalogModels(): Promise<{
         if (needsUpdate) {
           updateModel.run(
             storedProvider,
-            item.name,
+            safeName,
             existing.context_window === '—' ? contextWindow : existing.context_window,
             !isFree && existing.input_price_micros === 0 ? inputMicros : existing.input_price_micros,
             !isFree && existing.output_price_micros === 0 ? outputMicros : existing.output_price_micros,

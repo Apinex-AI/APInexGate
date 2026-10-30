@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fetch as undiciFetch, ProxyAgent, type Dispatcher } from 'undici'
+import { assertSafeUpstreamUrl } from './upstreamFallback.js'
 
 const PROXY_FILE = process.env.PROXY_FILE?.trim() || resolve(process.cwd(), 'proxy.txt')
 
@@ -65,6 +66,7 @@ function withApinexSourceHeader(init: RequestInit = {}): RequestInit {
 }
 
 export async function proxiedFetchUrl(url: string, init: RequestInit, proxyUrl: string): Promise<Response> {
+  assertSafeUpstreamUrl(url)
   const dispatcher = dispatcherForProxyUrl(proxyUrl)
   const nextInit = withApinexSourceHeader(init)
   return (await undiciFetch(url, { ...(nextInit as Record<string, unknown>), dispatcher } as never)) as unknown as Response
@@ -75,6 +77,7 @@ export async function proxiedFetch(
   init: RequestInit,
   proxyIndex: number | null,
 ): Promise<Response> {
+  assertSafeUpstreamUrl(url)
   const nextInit = withApinexSourceHeader(init)
   const dispatcher = dispatcherForProxyIndex(proxyIndex)
   if (!dispatcher) return globalThis.fetch(url, nextInit)

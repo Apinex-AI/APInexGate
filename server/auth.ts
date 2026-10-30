@@ -148,8 +148,7 @@ export function getCustomerSessionUser(request: FastifyRequest) {
     .prepare(`
       SELECT s.id, s.expires_at,
              u.id AS user_id, u.email, u.name, u.plan, u.status, u.balance_tokens,
-             u.solana_wallet, u.auth_method, u.password_hash, u.google_sub,
-             u.telegram_id, u.telegram_username, u.telegram_verified_at
+             u.solana_wallet, u.auth_method, u.password_hash, u.google_sub
       FROM user_sessions s
       JOIN users u ON u.id = s.user_id
       WHERE s.id = ?
@@ -168,9 +167,6 @@ export function getCustomerSessionUser(request: FastifyRequest) {
         auth_method: string | null
         password_hash: string | null
         google_sub: string | null
-        telegram_id: string | null
-        telegram_username: string | null
-        telegram_verified_at: string | null
       }
     | undefined
 
@@ -199,9 +195,6 @@ export function getCustomerSessionUser(request: FastifyRequest) {
     authMethod: session.auth_method,
     passwordHash: session.password_hash,
     googleSub: session.google_sub,
-    telegramId: session.telegram_id,
-    telegramUsername: session.telegram_username,
-    telegramVerifiedAt: session.telegram_verified_at,
   }
 }
 

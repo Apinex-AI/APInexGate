@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import {
   clearSessionCookie,
   clearUserSessionCookie,
-  createSession,
+  createAdminSession,
   createUserSession,
   destroySession,
   destroyUserSession,
@@ -40,6 +40,7 @@ import {
   syncProviderKey,
   type ModelCategory,
 } from './providerKeys.js'
+import { isValidModelId, isValidModelName } from '../shared/modelValidation.js'
 import { isUpstreamProvider } from '../shared/providers.js'
 import { ALLOWED_EMAIL_DOMAINS_HINT, isAllowedEmailDomain } from '../shared/allowedEmailDomains.js'
 import { isAdminConsoleHost, requestHostname } from '../shared/adminHosts.js'
@@ -178,11 +179,7 @@ import {
   isInstallTool,
   resolveInstallOs,
 } from './installScripts.js'
-import {
-  claimApprovedLoginSession,
-  createAdminLoginApproval,
-  getAdminLoginApprovalStatus,
-} from './adminLoginApproval.js'
+
 import { parseSafeInt } from './db.js'
 
 function hashApiKey(secret: string) {
@@ -301,9 +298,6 @@ function publicUser(user: {
   balanceTokens: number
   passwordHash?: string | null
   googleSub?: string | null
-  telegramId?: string | null
-  telegramUsername?: string | null
-  telegramVerifiedAt?: string | null
 }) {
   return {
     id: user.id,
@@ -315,9 +309,6 @@ function publicUser(user: {
     loginEmail: user.email.includes('@') ? user.email : null,
     hasPassword: Boolean(user.passwordHash),
     googleLinked: Boolean(user.googleSub),
-    telegramId: null,
-    telegramUsername: null,
-    telegramVerified: true,
     level: getAccountLevel(user.id),
   }
 }
@@ -325,8 +316,7 @@ function publicUser(user: {
 function loadPublicUserById(userId: string) {
   const row = db
     .prepare(
-      `SELECT id, name, email, status, balance_tokens, password_hash, google_sub,
-              telegram_id, telegram_username, telegram_verified_at
+      `SELECT id, name, email, status, balance_tokens, password_hash, google_sub
        FROM users WHERE id = ?`,
     )
     .get(userId) as
@@ -338,9 +328,6 @@ function loadPublicUserById(userId: string) {
         balance_tokens: number
         password_hash: string | null
         google_sub: string | null
-        telegram_id: string | null
-        telegram_username: string | null
-        telegram_verified_at: string | null
       }
     | undefined
   if (!row) return null
@@ -352,9 +339,6 @@ function loadPublicUserById(userId: string) {
     balanceTokens: row.balance_tokens,
     passwordHash: row.password_hash,
     googleSub: row.google_sub,
-    telegramId: row.telegram_id,
-    telegramUsername: row.telegram_username,
-    telegramVerifiedAt: row.telegram_verified_at,
   })
 }
 
@@ -597,10 +581,7 @@ export async function registerRoutes(app: FastifyInstance) {
       return reply.code(401).send({ error: 'Invalid password' })
     }
 
-    const approval = await createAdminLoginApproval({
-      adminId: admin.id,
-      adminEmail: admin.email,
-    })
+    const session = createAdminSession(admin.id)
 
     db.prepare('UPDATE admin_users SET last_login_at = ? WHERE id = ?').run(nowIso(), admin.id)
     db.prepare(
@@ -613,52 +594,12 @@ export async function registerRoutes(app: FastifyInstance) {
       '{}',
       nowIso(),
     )
-    setSessionCookie(reply, approval.session.sessionId, approval.session.expiresAt)
+    setSessionCookie(reply, session.sessionId, session.expiresAt)
     return {
       pending: false as const,
       user: { id: admin.id, email: admin.email, role: admin.role },
-      expiresAt: approval.session.expiresAt,
+      expiresAt: session.expiresAt,
     }
-  })
-
-  app.get<{ Querystring: { requestId?: string } }>('/api/auth/login/status', async (request, reply) => {
-    if (!requireAdminHost(request, reply)) return
-    const requestId = String(request.query.requestId ?? '').trim()
-    if (
-      !enforceRateLimit(
-        reply,
-        rateLimitKey(['admin-login-status', requestId]),
-        RL.adminLoginStatusIp.limit,
-        RL.adminLoginStatusIp.windowMs,
-        'Too many status checks. Try again later.',
-      )
-    ) {
-      return
-    }
-
-    if (!requestId) return reply.code(400).send({ error: 'requestId is required' })
-
-    const status = getAdminLoginApprovalStatus(requestId)
-    if (!status.ok) return reply.code(404).send({ error: 'Login request not found' })
-
-    if (status.status === 'approved' && 'sessionId' in status && status.sessionId) {
-      const claimed = claimApprovedLoginSession(requestId)
-      if (claimed.ok && claimed.status === 'approved' && 'sessionId' in claimed && claimed.sessionId) {
-        const admin = db
-          .prepare('SELECT id, email, role FROM admin_users WHERE id = ?')
-          .get(claimed.adminId) as { id: string; email: string; role: string } | undefined
-        setSessionCookie(reply, claimed.sessionId, claimed.expiresAt)
-        return {
-          status: 'approved' as const,
-          user: admin
-            ? { id: admin.id, email: admin.email, role: admin.role }
-            : { id: claimed.adminId, email: claimed.adminEmail, role: 'owner' },
-          expiresAt: claimed.expiresAt,
-        }
-      }
-    }
-
-    return { status: status.status }
   })
 
   app.post('/api/auth/logout', async (request, reply) => {
@@ -1017,49 +958,7 @@ export async function registerRoutes(app: FastifyInstance) {
     }
   })
 
-  app.get('/api/user/telegram/status', async () => {
-    return {
-      ok: true,
-      linked: false,
-      verified: true,
-      claimed: false,
-      telegramId: null,
-      telegramUsername: null,
-      telegramVerifiedAt: null,
-      channelUrl: '',
-      groupUrl: '',
-      botUsername: '',
-    }
-  })
 
-  app.post('/api/user/telegram/verify', async () => {
-    return {
-      ok: true,
-      verified: true,
-      message: 'Verified',
-      inChannel: true,
-      inGroup: true,
-    }
-  })
-
-  app.get('/api/user/telegram/bonus', async () => {
-    return {
-      enabled: false,
-      bonusUsd: 0,
-      bonusTokens: 0,
-      linked: false,
-      verified: true,
-      claimed: false,
-      configured: false,
-      botUsername: '',
-      channelUrl: '',
-      groupUrl: '',
-    }
-  })
-
-  app.post('/api/user/telegram/link', async (_request, reply) => {
-    return reply.code(400).send({ error: 'Telegram integration is disabled' })
-  })
 
   app.get('/api/user/rewards', async (request, reply) => {
     const user = requireCustomer(request, reply)
@@ -2270,7 +2169,7 @@ export async function registerRoutes(app: FastifyInstance) {
     if (!actor) return
     db.prepare('UPDATE provider_accounts SET status = ? WHERE id = ?').run(request.body.status, request.params.id)
     db.prepare('INSERT INTO audit_logs (id, actor_email, action, target, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(
-      id('audit'), actor.email, 'provider.updated', request.params.id, JSON.stringify(request.body), nowIso(),
+      id('audit'), actor.email, 'provider.updated', request.params.id, JSON.stringify({ status: request.body.status }), nowIso(),
     )
     return { ok: true }
   })
@@ -2446,7 +2345,7 @@ export async function registerRoutes(app: FastifyInstance) {
         provider: String(r?.upstreamProvider ?? '').trim(),
         modelId: String(r?.upstreamId ?? '').trim(),
       }))
-      .filter((r) => isUpstreamProvider(r.provider) && r.modelId)
+      .filter((r) => isUpstreamProvider(r.provider) && isValidModelId(r.modelId))
 
     if (cleanRoutes.length === 0) {
       return reply.code(400).send({ error: 'Primary route must specify a valid upstream provider and upstream model ID' })
@@ -2533,14 +2432,21 @@ export async function registerRoutes(app: FastifyInstance) {
     const current = db.prepare(`SELECT * FROM model_catalog WHERE id = ?`).get(modelId) as Record<string, unknown> | undefined
     if (!current) return reply.code(404).send({ error: 'Model not found' })
     const body = request.body ?? {}
+    if (body.id !== undefined && (typeof body.id !== 'string' || !isValidModelId(body.id.trim()))) {
+      return reply.code(400).send({ error: 'Invalid model id' })
+    }
     const nextModelId = typeof body.id === 'string' && body.id.trim() ? body.id.trim() : modelId
-    if (!/^[a-zA-Z0-9._:/-]+$/.test(nextModelId)) return reply.code(400).send({ error: 'Invalid model id' })
+    if (!isValidModelId(nextModelId)) return reply.code(400).send({ error: 'Invalid model id' })
     if (nextModelId !== modelId) {
       const duplicate = db.prepare(`SELECT 1 FROM model_catalog WHERE id = ?`).get(nextModelId)
       if (duplicate) return reply.code(409).send({ error: 'A model with this id already exists' })
     }
     const nextProvider = typeof body.provider === 'string' && body.provider.trim() ? body.provider.trim() : String(current.provider)
+    if (body.name !== undefined && (typeof body.name !== 'string' || !isValidModelName(body.name))) {
+      return reply.code(400).send({ error: 'Invalid model name' })
+    }
     const nextName = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : String(current.name)
+    if (!isValidModelName(nextName)) return reply.code(400).send({ error: 'Invalid model name' })
     const nextContext = typeof body.contextWindow === 'string' && body.contextWindow.trim() ? body.contextWindow.trim() : String(current.context_window)
     const nextUpstreamId = typeof body.upstreamId === 'string' && body.upstreamId.trim() ? body.upstreamId.trim() : String(current.upstream_id ?? current.id)
     const nextUpstreamProvider = typeof body.upstreamProvider === 'string' && body.upstreamProvider.trim() ? body.upstreamProvider.trim() : String(current.upstream_provider ?? 'apinex')
@@ -2558,7 +2464,7 @@ export async function registerRoutes(app: FastifyInstance) {
             provider: String(route?.upstreamProvider ?? '').trim(),
             modelId: String(route?.upstreamId ?? '').trim(),
           }))
-          .filter((route) => isUpstreamProvider(route.provider) && route.modelId)
+          .filter((route) => isUpstreamProvider(route.provider) && isValidModelId(route.modelId))
       : existingRoutes.length > 0
         ? existingRoutes
         : [{ provider: nextUpstreamProvider, modelId: nextUpstreamId }]
@@ -2646,8 +2552,11 @@ export async function registerRoutes(app: FastifyInstance) {
     const outputPrice = Number(request.body.outputPrice ?? 0)
     const tokenWeight = Number(request.body.tokenWeight ?? request.body.inputMultiplier ?? 1)
     if (!modelId || !name || !provider) return reply.code(400).send({ error: 'Model id, name and provider are required' })
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/.test(modelId)) {
+    if (!isValidModelId(modelId)) {
       return reply.code(400).send({ error: 'API model id may only use letters, numbers, ., _, :, /, -' })
+    }
+    if (!isValidModelName(name)) {
+      return reply.code(400).send({ error: 'Invalid model name' })
     }
     if (!Number.isFinite(tokenWeight) || tokenWeight < 0) {
       return reply.code(400).send({ error: 'tokenWeight must be 0 or a positive number' })
@@ -2819,19 +2728,27 @@ export async function registerRoutes(app: FastifyInstance) {
     return { ok: true, minTopupCents: cents }
   })
 
-  app.patch('/api/admin/settings/telegram-bonus', async () => {
+  app.patch('/api/admin/settings/telegram-bonus', async (request, reply) => {
+    const actor = requireAuth(request, reply)
+    if (!actor) return
     return { ok: true, settings: { enabled: false, bonusTokens: 0, bonusUsd: 0 } }
   })
 
-  app.get('/api/admin/telegram/broadcast/audience', async () => {
+  app.get('/api/admin/telegram/broadcast/audience', async (request, reply) => {
+    const actor = requireAuth(request, reply)
+    if (!actor) return
     return { reachable: 0, configured: false }
   })
 
-  app.get<{ Params: { id: string } }>('/api/admin/telegram/broadcasts/:id', async (_request, reply) => {
+  app.get<{ Params: { id: string } }>('/api/admin/telegram/broadcasts/:id', async (request, reply) => {
+    const actor = requireAuth(request, reply)
+    if (!actor) return
     return reply.code(404).send({ error: 'Broadcast not found' })
   })
 
-  app.post('/api/admin/telegram/broadcast', async (_request, reply) => {
+  app.post('/api/admin/telegram/broadcast', async (request, reply) => {
+    const actor = requireAuth(request, reply)
+    if (!actor) return
     return reply.code(400).send({ error: 'Telegram broadcasts are disabled' })
   })
 
@@ -3459,9 +3376,13 @@ export async function registerRoutes(app: FastifyInstance) {
   app.patch<{ Params: { id: string }; Body: { status?: string } }>('/api/admin/api-keys/:id', async (request, reply) => {
     const actor = requireAuth(request, reply)
     if (!actor) return
-    db.prepare('UPDATE api_keys SET status = ? WHERE id = ?').run(request.body.status, request.params.id)
+    const status = request.body.status?.trim()
+    if (!status || !['active', 'suspended', 'revoked'].includes(status)) {
+      return reply.code(400).send({ error: 'Status must be active, suspended, or revoked' })
+    }
+    db.prepare('UPDATE api_keys SET status = ? WHERE id = ?').run(status, request.params.id)
     db.prepare('INSERT INTO audit_logs (id, actor_email, action, target, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(
-      id('audit'), actor.email, 'key.updated', request.params.id, JSON.stringify(request.body), nowIso(),
+      id('audit'), actor.email, 'key.updated', request.params.id, JSON.stringify({ status }), nowIso(),
     )
     return { ok: true }
   })

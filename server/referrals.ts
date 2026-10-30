@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { db, getSetting, id, nowIso, setSetting } from './db.js'
+import { db, getSetting, id, nowIso, setSetting, tableExists } from './db.js'
 import { onUserBalanceCredited } from './userBalanceAlerts.js'
 import { TOKENS_PER_USD, formatUsdExact, tokensFromUsdCents } from '../shared/billing.js'
 
@@ -191,19 +191,34 @@ export function applyReferralCode(userId: string, rawCode: string | null | undef
   let granted: ReturnType<typeof tryGrantReferralReward> = { granted: false }
   try {
     const settings = getReferralSettings()
-    const qualPay = db
-      .prepare(
-        `SELECT id, amount_cents FROM (
-           SELECT id, amount_cents, credited_at FROM crypto_payments WHERE user_id = ? AND credited_at IS NOT NULL
-           UNION ALL
-           SELECT id, amount_cents, credited_at FROM subscription_payments WHERE user_id = ? AND credited_at IS NOT NULL
-           UNION ALL
-           SELECT id, amount_cents, credited_at FROM rpm_payments WHERE user_id = ? AND credited_at IS NOT NULL
-           UNION ALL
-           SELECT id, amount_cents, created_at AS credited_at FROM wallet_purchases WHERE user_id = ?
-         ) WHERE amount_cents > 0 ORDER BY datetime(credited_at) ASC LIMIT 1`,
-      )
-      .get(userId, userId, userId, userId) as { id: string; amount_cents: number } | undefined
+    const parts: string[] = []
+    const params: unknown[] = []
+    if (tableExists('crypto_payments')) {
+      parts.push(`SELECT id, amount_cents, credited_at FROM crypto_payments WHERE user_id = ? AND credited_at IS NOT NULL`)
+      params.push(userId)
+    }
+    if (tableExists('subscription_payments')) {
+      parts.push(`SELECT id, amount_cents, credited_at FROM subscription_payments WHERE user_id = ? AND credited_at IS NOT NULL`)
+      params.push(userId)
+    }
+    if (tableExists('rpm_payments')) {
+      parts.push(`SELECT id, amount_cents, credited_at FROM rpm_payments WHERE user_id = ? AND credited_at IS NOT NULL`)
+      params.push(userId)
+    }
+    if (tableExists('wallet_purchases')) {
+      parts.push(`SELECT id, amount_cents, created_at AS credited_at FROM wallet_purchases WHERE user_id = ?`)
+      params.push(userId)
+    }
+
+    const qualPay = parts.length > 0
+      ? (db
+          .prepare(
+            `SELECT id, amount_cents FROM (
+               ${parts.join('\nUNION ALL\n')}
+             ) WHERE amount_cents > 0 ORDER BY datetime(credited_at) ASC LIMIT 1`,
+          )
+          .get(...params) as { id: string; amount_cents: number } | undefined)
+      : undefined
     if (qualPay) {
       granted = tryGrantReferralReward({
         userId,
@@ -228,18 +243,22 @@ export function userReferralStats(userId: string) {
   const invited = (
     db.prepare(`SELECT COUNT(*) AS n FROM users WHERE referred_by = ?`).get(userId) as { n: number }
   ).n
-  const rewarded = (
-    db
-      .prepare(`SELECT COUNT(*) AS n FROM referral_rewards WHERE referrer_user_id = ?`)
-      .get(userId) as { n: number }
-  ).n
-  const earnedCents = (
-    db
-      .prepare(
-        `SELECT COALESCE(SUM(referrer_tokens), 0) * 100.0 / ${TOKENS_PER_USD} AS n FROM referral_rewards WHERE referrer_user_id = ?`,
-      )
-      .get(userId) as { n: number }
-  ).n
+  const rewarded = tableExists('referral_rewards')
+    ? (
+        db
+          .prepare(`SELECT COUNT(*) AS n FROM referral_rewards WHERE referrer_user_id = ?`)
+          .get(userId) as { n: number }
+      ).n
+    : 0
+  const earnedCents = tableExists('referral_rewards')
+    ? (
+        db
+          .prepare(
+            `SELECT COALESCE(SUM(referrer_tokens), 0) * 100.0 / ${TOKENS_PER_USD} AS n FROM referral_rewards WHERE referrer_user_id = ?`,
+          )
+          .get(userId) as { n: number }
+      ).n
+    : 0
   const me = db
     .prepare(`SELECT referred_by FROM users WHERE id = ?`)
     .get(userId) as { referred_by: string | null } | undefined
@@ -294,17 +313,32 @@ export function tryGrantReferralReward(input: {
   }
 
   // Count all historical purchases (Crypto, Card, Balance: Top-up, Subscriptions, RPM)
-  const totalSpentCents = ((db.prepare(`
-    SELECT COALESCE(SUM(amount_cents), 0) AS total FROM (
-      SELECT amount_cents FROM crypto_payments WHERE user_id = ? AND credited_at IS NOT NULL
-      UNION ALL
-      SELECT amount_cents FROM subscription_payments WHERE user_id = ? AND credited_at IS NOT NULL
-      UNION ALL
-      SELECT amount_cents FROM rpm_payments WHERE user_id = ? AND credited_at IS NOT NULL
-      UNION ALL
-      SELECT amount_cents FROM wallet_purchases WHERE user_id = ?
-    )
-  `).get(input.userId, input.userId, input.userId, input.userId) as { total: number } | undefined)?.total ?? 0)
+  const parts: string[] = []
+  const params: unknown[] = []
+  if (tableExists('crypto_payments')) {
+    parts.push(`SELECT amount_cents FROM crypto_payments WHERE user_id = ? AND credited_at IS NOT NULL`)
+    params.push(input.userId)
+  }
+  if (tableExists('subscription_payments')) {
+    parts.push(`SELECT amount_cents FROM subscription_payments WHERE user_id = ? AND credited_at IS NOT NULL`)
+    params.push(input.userId)
+  }
+  if (tableExists('rpm_payments')) {
+    parts.push(`SELECT amount_cents FROM rpm_payments WHERE user_id = ? AND credited_at IS NOT NULL`)
+    params.push(input.userId)
+  }
+  if (tableExists('wallet_purchases')) {
+    parts.push(`SELECT amount_cents FROM wallet_purchases WHERE user_id = ?`)
+    params.push(input.userId)
+  }
+
+  const totalSpentCents = parts.length > 0
+    ? (((db.prepare(`
+        SELECT COALESCE(SUM(amount_cents), 0) AS total FROM (
+          ${parts.join('\nUNION ALL\n')}
+        )
+      `).get(...params) as { total: number } | undefined)?.total ?? 0))
+    : 0
 
   if (!input.forceIfQualified && totalSpentCents < settings.minPurchaseCents) {
     return { granted: false }
@@ -314,6 +348,10 @@ export function tryGrantReferralReward(input: {
     .prepare(`SELECT id, referred_by FROM users WHERE id = ?`)
     .get(input.userId) as { id: string; referred_by: string | null } | undefined
   if (!user?.referred_by) return { granted: false }
+
+  if (!tableExists('referral_rewards') || !tableExists('balance_transactions')) {
+    return { granted: false }
+  }
 
   const existing = db
     .prepare(`SELECT referee_user_id FROM referral_rewards WHERE referee_user_id = ?`)

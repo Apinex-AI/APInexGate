@@ -12,6 +12,8 @@ const RESERVE_BUFFER_RATIO = 0.08
 /** Open reservations auto-release after this TTL (covers crashes / stuck streams). */
 export const RESERVATION_TTL_MS = 15 * 60 * 1000
 
+const reservationAbortCleanups = new Map<string, () => void>()
+
 export type TokenReservationRow = {
   id: string
   user_id: string
@@ -133,7 +135,11 @@ export function tryReserveTokens(input: {
   modelId?: string | null
   path?: string | null
   allowRestrictedCredits?: boolean
+  signal?: AbortSignal
 }): { ok: true; reservationId: string; reservedTokens: number } | { ok: false; error: string; status: 402 } {
+  if (input.signal?.aborted) {
+    return { ok: false, error: 'Request aborted', status: 402 }
+  }
   const amount = Math.max(0, Math.floor(Number(input.amount) || 0))
   if (amount <= 0) {
     // Zero-cost paths still get a reservation row for uniform settle/release.
@@ -154,6 +160,21 @@ export function tryReserveTokens(input: {
       createdAt,
       expiresAt,
     )
+
+    if (input.signal) {
+      const onAbort = () => {
+        try {
+          releaseReservation(reservationId)
+        } catch {
+          /* ignore */
+        }
+      }
+      input.signal.addEventListener('abort', onAbort, { once: true })
+      reservationAbortCleanups.set(reservationId, () => {
+        input.signal?.removeEventListener('abort', onAbort)
+      })
+    }
+
     return { ok: true, reservationId, reservedTokens: 0 }
   }
 
@@ -166,8 +187,12 @@ export function tryReserveTokens(input: {
       .get(input.userId) as
       | { id: string; balance_tokens: number; restricted_tokens: number; reserved_tokens: number; status: string }
       | undefined
-    if (!user || user.status === 'suspended') {
-      return { ok: false as const, error: 'Account suspended or missing', status: 402 as const }
+    if (!user || user.status === 'suspended' || user.status === 'pending' || user.status !== 'active') {
+      return {
+        ok: false as const,
+        error: user?.status === 'pending' ? 'Account pending activation' : 'Account suspended or missing',
+        status: 402 as const,
+      }
     }
     const allowRestrictedCredits = input.allowRestrictedCredits !== false
     if (!allowRestrictedCredits && !hasUserTopup(input.userId)) {
@@ -255,16 +280,35 @@ export function tryReserveTokens(input: {
       expiresAt,
     )
 
-    return { ok: true as const, reservationId, reservedTokens: amount }
+    const result = { ok: true as const, reservationId, reservedTokens: amount }
+    if (input.signal) {
+      const onAbort = () => {
+        try {
+          releaseReservation(reservationId)
+        } catch {
+          /* ignore */
+        }
+      }
+      input.signal.addEventListener('abort', onAbort, { once: true })
+      reservationAbortCleanups.set(reservationId, () => {
+        input.signal?.removeEventListener('abort', onAbort)
+      })
+    }
+    return result
   })
 
   return tx()
 }
 
-function loadOpenReservation(reservationId: string): TokenReservationRow | null {
+function loadReservation(reservationId: string): TokenReservationRow | null {
   const row = db
     .prepare(`SELECT * FROM token_reservations WHERE id = ?`)
     .get(reservationId) as TokenReservationRow | undefined
+  return row ?? null
+}
+
+function loadOpenReservation(reservationId: string): TokenReservationRow | null {
+  const row = loadReservation(reservationId)
   if (!row || row.status !== 'open') return null
   return row
 }
@@ -273,6 +317,7 @@ function loadOpenReservation(reservationId: string): TokenReservationRow | null 
  * Finalize a hold: charge `chargedTokens` against the reservation.
  * Refunds unused hold to the user balance. If actual cost somehow exceeds hold,
  * attempts to debit the extra from remaining balance (clamp at 0).
+ * Fully atomic and idempotent.
  */
 export function settleReservation(
   reservationId: string,
@@ -280,8 +325,18 @@ export function settleReservation(
 ): { ok: boolean; charged: number; refunded: number } {
   const charge = Math.max(0, Math.floor(Number(chargedTokens) || 0))
   const tx = db.transaction(() => {
-    const row = loadOpenReservation(reservationId)
+    const row = loadReservation(reservationId)
     if (!row) return { ok: false, charged: 0, refunded: 0 }
+
+    // Idempotent settlement: if already settled, return existing result without re-billing.
+    if (row.status === 'settled') {
+      const reserved = Math.max(0, row.reserved_tokens)
+      const charged = Math.max(0, row.charged_tokens)
+      const refunded = Math.max(0, reserved - Math.min(charged, reserved))
+      return { ok: true, charged, refunded }
+    }
+
+    if (row.status !== 'open') return { ok: false, charged: 0, refunded: 0 }
 
     const reserved = Math.max(0, row.reserved_tokens)
     const applied = Math.min(charge, reserved)
@@ -331,16 +386,29 @@ export function settleReservation(
        WHERE id = ? AND status = 'open'`,
     ).run(charge, updatedAt, updatedAt, reservationId)
 
+    const cleanup = reservationAbortCleanups.get(reservationId)
+    if (cleanup) {
+      reservationAbortCleanups.delete(reservationId)
+      try { cleanup() } catch { /* ignore */ }
+    }
+
     return { ok: true, charged: charge, refunded: refund }
   })
   return tx()
 }
 
-/** Release a full open hold (errors / aborted upstream) — refund everything. */
+/** Release a full open hold (errors / aborted upstream) — refund everything. Fully atomic and idempotent. */
 export function releaseReservation(reservationId: string): { ok: boolean; refunded: number } {
   const tx = db.transaction(() => {
-    const row = loadOpenReservation(reservationId)
+    const row = loadReservation(reservationId)
     if (!row) return { ok: false, refunded: 0 }
+
+    // Idempotent release: if already released or expired, return success without duplicate refund.
+    if (row.status === 'released' || row.status === 'expired') {
+      return { ok: true, refunded: Math.max(0, row.reserved_tokens) }
+    }
+
+    if (row.status !== 'open') return { ok: false, refunded: 0 }
 
     const reserved = Math.max(0, row.reserved_tokens)
     const restrictedReserved = Math.max(0, row.reserved_restricted_tokens || 0)
@@ -370,55 +438,73 @@ export function releaseReservation(reservationId: string): { ok: boolean; refund
        WHERE id = ? AND status = 'open'`,
     ).run(updatedAt, updatedAt, reservationId)
 
+    const cleanup = reservationAbortCleanups.get(reservationId)
+    if (cleanup) {
+      reservationAbortCleanups.delete(reservationId)
+      try { cleanup() } catch { /* ignore */ }
+    }
+
     return { ok: true, refunded: reserved }
   })
   return tx()
 }
 
+/** Aliases ensuring settleTokens and releaseTokens naming conventions work atomically and idempotently. */
+export const settleTokens = settleReservation
+export const releaseTokens = releaseReservation
+
 /** Sweep expired open holds (process crash / abandoned streams). */
 export function expireOpenReservations(now = new Date()): number {
   const nowIsoStr = now.toISOString()
-  const open = db
-    .prepare(
-      `SELECT id FROM token_reservations WHERE status = 'open' AND expires_at <= ? LIMIT 200`,
-    )
-    .all(nowIsoStr) as Array<{ id: string }>
+  let totalExpired = 0
 
-  let count = 0
-  for (const row of open) {
-    const tx = db.transaction(() => {
-      const full = loadOpenReservation(row.id)
-      if (!full) return false
-      const reserved = Math.max(0, full.reserved_tokens)
-      const restrictedReserved = Math.max(0, full.reserved_restricted_tokens || 0)
-      const updatedAt = nowIso()
-      if (reserved > 0) {
+  while (true) {
+    const open = db
+      .prepare(
+        `SELECT id FROM token_reservations WHERE status = 'open' AND expires_at <= ? LIMIT 200`,
+      )
+      .all(nowIsoStr) as Array<{ id: string }>
+
+    if (open.length === 0) break
+
+    let batchCount = 0
+    for (const row of open) {
+      const tx = db.transaction(() => {
+        const full = loadOpenReservation(row.id)
+        if (!full) return false
+        const reserved = Math.max(0, full.reserved_tokens)
+        const restrictedReserved = Math.max(0, full.reserved_restricted_tokens || 0)
+        const updatedAt = nowIso()
+        if (reserved > 0) {
+          db.prepare(
+            `UPDATE users
+             SET balance_tokens = balance_tokens + ?,
+                 restricted_tokens = COALESCE(restricted_tokens, 0) + ?,
+                 reserved_tokens = MAX(0, COALESCE(reserved_tokens, 0) - ?)
+             WHERE id = ?`,
+          ).run(reserved, restrictedReserved, reserved, full.user_id)
+          db.prepare(
+            `UPDATE api_keys
+             SET reserved_tokens = MAX(0, COALESCE(reserved_tokens, 0) - ?)
+             WHERE id = ?`,
+          ).run(reserved, full.api_key_id)
+        }
         db.prepare(
-          `UPDATE users
-           SET balance_tokens = balance_tokens + ?,
-               restricted_tokens = COALESCE(restricted_tokens, 0) + ?,
-               reserved_tokens = MAX(0, COALESCE(reserved_tokens, 0) - ?)
-           WHERE id = ?`,
-        ).run(reserved, restrictedReserved, reserved, full.user_id)
-        db.prepare(
-          `UPDATE api_keys
-           SET reserved_tokens = MAX(0, COALESCE(reserved_tokens, 0) - ?)
-           WHERE id = ?`,
-        ).run(reserved, full.api_key_id)
-      }
-      db.prepare(
-        `UPDATE token_reservations
-         SET status = 'expired',
-             charged_tokens = 0,
-             updated_at = ?,
-             settled_at = ?
-         WHERE id = ? AND status = 'open'`,
-      ).run(updatedAt, updatedAt, row.id)
-      return true
-    })
-    if (tx()) count += 1
+          `UPDATE token_reservations
+           SET status = 'expired',
+               charged_tokens = 0,
+               updated_at = ?,
+               settled_at = ?
+           WHERE id = ? AND status = 'open'`,
+        ).run(updatedAt, updatedAt, row.id)
+        return true
+      })
+      if (tx()) batchCount += 1
+    }
+    totalExpired += batchCount
+    if (open.length < 200 || batchCount === 0) break
   }
-  return count
+  return totalExpired
 }
 
 let expiryTimer: ReturnType<typeof setInterval> | null = null

@@ -12,6 +12,7 @@ import { startProviderBalanceSyncJob } from './providerKeys.js'
 import { startPaymentInvoiceExpiryJob } from './paymentExpiry.js'
 import './seed.js'
 import { importCatalogFiles } from './catalogImport.js'
+import { sanitizeErrorMessage } from './upstreamFallback.js'
 
 importCatalogFiles()
 
@@ -121,10 +122,26 @@ app.setErrorHandler((error: unknown, request, reply) => {
     request.log.error(error)
   }
 
+  const message =
+    statusCode >= 500
+      ? 'Internal Server Error'
+      : sanitizeErrorMessage(err.message || 'An error occurred')
+
+  if (request.url.startsWith('/v1/')) {
+    return reply.code(statusCode).send({
+      error: {
+        message,
+        type: statusCode >= 500 ? 'api_error' : 'invalid_request_error',
+        param: null,
+        code: statusCode,
+      },
+    })
+  }
+
   return reply.code(statusCode).send({
     statusCode,
     error: err.name || 'Internal Server Error',
-    message: err.message,
+    message,
   })
 })
 

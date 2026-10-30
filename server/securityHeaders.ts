@@ -5,6 +5,26 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
  * if a request hits the Node process directly.
  */
 export function registerSecurityHeaders(app: FastifyInstance) {
+  app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
+    const rawPath = request.url.split('?')[0] || ''
+    let decodedPath = rawPath
+    try {
+      decodedPath = decodeURIComponent(rawPath)
+    } catch {
+      return reply.code(400).send({ statusCode: 400, error: 'Bad Request', message: 'Invalid URL encoding' })
+    }
+
+    // Strictly block directory traversal and access to sensitive files (.env, sqlite databases, git, package.json, configs)
+    if (
+      decodedPath.includes('..') ||
+      /(?:^|\/)\.(env|git|oxlintrc|vscode|idea)/i.test(decodedPath) ||
+      /(?:^|\/)(?:data\/|package\.json|package-lock\.json|tsconfig)/i.test(decodedPath) ||
+      /\.(sqlite|sqlite-shm|sqlite-wal|sqlite-journal)$/i.test(decodedPath)
+    ) {
+      return reply.code(404).send({ statusCode: 404, error: 'Not Found', message: 'Not Found' })
+    }
+  })
+
   app.addHook('onSend', async (request: FastifyRequest, reply: FastifyReply, payload) => {
     reply.header('X-Content-Type-Options', 'nosniff')
     reply.header('X-Frame-Options', 'DENY')

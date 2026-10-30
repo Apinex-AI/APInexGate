@@ -293,7 +293,11 @@ export function createPromoCode(input: {
     rewardCents = 0
     planKey = null
   } else {
-    rewardCents = Math.round(Number(input.rewardUsd ?? 0) * 100)
+    const rawReward = Number(input.rewardUsd ?? 0)
+    if (!Number.isFinite(rawReward) || rawReward < 0.01) {
+      throw new Error('Reward must be at least $0.01')
+    }
+    rewardCents = Math.round(rawReward * 100)
     if (!Number.isFinite(rewardCents) || rewardCents < 1) {
       throw new Error('Reward must be at least $0.01')
     }
@@ -430,7 +434,11 @@ export function updatePromoCode(
     rewardCents = 0
     planKey = null
   } else {
-    rewardCents = Math.round(Number(input.rewardUsd ?? 0) * 100)
+    const rawReward = Number(input.rewardUsd ?? 0)
+    if (!Number.isFinite(rawReward) || rawReward < 0.01) {
+      throw new Error('Reward must be at least $0.01')
+    }
+    rewardCents = Math.round(rawReward * 100)
     if (!Number.isFinite(rewardCents) || rewardCents < 1) {
       throw new Error('Reward must be at least $0.01')
     }
@@ -830,7 +838,7 @@ export function redeemPromoCode(input: {
     }
   })
 
-  const result = tx()
+  const result = tx.immediate()
   if (result.type === 'balance') {
     onUserBalanceCredited(input.userId)
   } else if (result.type === 'subscription_offer' && result.offerLabel) {

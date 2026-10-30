@@ -1,4 +1,4 @@
-import { db, getSetting, id, nowIso, setSetting } from './db.js'
+import { db, getSetting, id, nowIso, setSetting, tableExists } from './db.js'
 import { levelSourceRef, recordLevelSpend } from './accountLevels.js'
 import { tryGrantReferralReward } from './referrals.js'
 import { getSiteLinks } from './siteLinks.js'
@@ -129,7 +129,7 @@ function extendExpiresAt(current: string | null | undefined, days = RPM_PLAN_DAY
   return addDaysIso(base, days)
 }
 
-function ensureRpmSchema() {
+export function ensureRpmSchema() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS rpm_grants (
       user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -157,16 +157,20 @@ function ensureRpmSchema() {
     CREATE INDEX IF NOT EXISTS idx_rpm_payments_user ON rpm_payments(user_id, created_at);
   `)
 
-  const cols = db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>
-  if (!cols.some((column) => column.name === 'rpm_plan')) {
-    db.exec("ALTER TABLE users ADD COLUMN rpm_plan TEXT NOT NULL DEFAULT 'free'")
+  if (tableExists('users')) {
+    const cols = db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>
+    if (!cols.some((column) => column.name === 'rpm_plan')) {
+      db.exec("ALTER TABLE users ADD COLUMN rpm_plan TEXT NOT NULL DEFAULT 'free'")
+    }
+    if (!cols.some((column) => column.name === 'rpm_expires_at')) {
+      db.exec('ALTER TABLE users ADD COLUMN rpm_expires_at TEXT')
+    }
   }
-  if (!cols.some((column) => column.name === 'rpm_expires_at')) {
-    db.exec('ALTER TABLE users ADD COLUMN rpm_expires_at TEXT')
-  }
-  const grantCols = db.prepare('PRAGMA table_info(rpm_grants)').all() as Array<{ name: string }>
-  if (!grantCols.some((column) => column.name === 'expires_at')) {
-    db.exec('ALTER TABLE rpm_grants ADD COLUMN expires_at TEXT')
+  if (tableExists('rpm_grants')) {
+    const grantCols = db.prepare('PRAGMA table_info(rpm_grants)').all() as Array<{ name: string }>
+    if (!grantCols.some((column) => column.name === 'expires_at')) {
+      db.exec('ALTER TABLE rpm_grants ADD COLUMN expires_at TEXT')
+    }
   }
 }
 
@@ -191,6 +195,7 @@ function planLabel(plan: Pick<RpmCatalogPlan, 'key' | 'rpm' | 'custom'>) {
 }
 
 export function getUserRpmPlanKey(userId: string): RpmPlanKey {
+  if (!tableExists('users')) return 'free'
   const row = db.prepare(`SELECT rpm_plan FROM users WHERE id = ?`).get(userId) as { rpm_plan: string | null } | undefined
   const key = row?.rpm_plan
   if (key === 'standard' || key === 'high' || key === 'custom' || key === 'free') return key
@@ -198,6 +203,7 @@ export function getUserRpmPlanKey(userId: string): RpmPlanKey {
 }
 
 function expireRpmIfDue(userId: string) {
+  if (!tableExists('users')) return
   const row = db.prepare(`SELECT rpm_plan, rpm_expires_at FROM users WHERE id = ?`).get(userId) as
     | { rpm_plan: string | null; rpm_expires_at: string | null }
     | undefined
@@ -210,6 +216,7 @@ function expireRpmIfDue(userId: string) {
   if (planExpired) {
     db.prepare(`UPDATE users SET rpm_plan = 'free', rpm_expires_at = NULL WHERE id = ?`).run(userId)
   }
+  if (!tableExists('rpm_grants')) return
   const grant = db.prepare(`SELECT expires_at FROM rpm_grants WHERE user_id = ?`).get(userId) as
     | { expires_at: string | null }
     | undefined
@@ -222,12 +229,16 @@ function expireRpmIfDue(userId: string) {
 export function getAccountRpm(userId: string): AccountRpm {
   expireRpmIfDue(userId)
   const catalog = getRpmCatalog()
-  const grant = db.prepare(`SELECT rpm, expires_at FROM rpm_grants WHERE user_id = ?`).get(userId) as
-    | { rpm: number; expires_at: string | null }
-    | undefined
-  const user = db.prepare(`SELECT rpm_expires_at FROM users WHERE id = ?`).get(userId) as
-    | { rpm_expires_at: string | null }
-    | undefined
+  const grant = tableExists('rpm_grants')
+    ? (db.prepare(`SELECT rpm, expires_at FROM rpm_grants WHERE user_id = ?`).get(userId) as
+        | { rpm: number; expires_at: string | null }
+        | undefined)
+    : undefined
+  const user = tableExists('users')
+    ? (db.prepare(`SELECT rpm_expires_at FROM users WHERE id = ?`).get(userId) as
+        | { rpm_expires_at: string | null }
+        | undefined)
+    : undefined
   const planKey = getUserRpmPlanKey(userId)
   const plan = catalog.find((row) => row.key === planKey) ?? catalog[0]
   if (grant && Number.isFinite(grant.rpm) && grant.rpm > 0) {
@@ -256,9 +267,11 @@ export function getAccountRpm(userId: string): AccountRpm {
 
 export function userRpmState(userId: string) {
   const account = getAccountRpm(userId)
-  const grant = db.prepare(`SELECT rpm, note, expires_at FROM rpm_grants WHERE user_id = ?`).get(userId) as
-    | { rpm: number; note: string | null; expires_at: string | null }
-    | undefined
+  const grant = tableExists('rpm_grants')
+    ? (db.prepare(`SELECT rpm, note, expires_at FROM rpm_grants WHERE user_id = ?`).get(userId) as
+        | { rpm: number; note: string | null; expires_at: string | null }
+        | undefined)
+    : undefined
   return {
     ...account,
     supportUrl: getSiteLinks().telegramSupport,
@@ -417,6 +430,7 @@ export type CreditRpmResult =
     }
 
 export function creditRpmCryptoOrder(orderId: string, npPaymentId?: string | null): CreditRpmResult | null {
+  if (!tableExists('rpm_payments')) return null
   const payment = db.prepare(`SELECT * FROM rpm_payments WHERE order_id = ?`).get(orderId) as RpmPaymentRow | undefined
   if (!payment) return null
   if (payment.credited_at) {
@@ -477,6 +491,7 @@ export function creditRpmCryptoOrder(orderId: string, npPaymentId?: string | nul
 }
 
 export function getRpmPaymentPublic(paymentId: string, userId: string) {
+  if (!tableExists('rpm_payments')) return null
   const payment = db.prepare(`SELECT * FROM rpm_payments WHERE id = ?`).get(paymentId) as RpmPaymentRow | undefined
   if (!payment || payment.user_id !== userId) return null
   return {
@@ -492,9 +507,11 @@ export function getRpmPaymentPublic(paymentId: string, userId: string) {
 
 export function adminRpmUser(userId: string) {
   const account = getAccountRpm(userId)
-  const grant = db.prepare(`SELECT rpm, note, updated_at, expires_at FROM rpm_grants WHERE user_id = ?`).get(userId) as
-    | { rpm: number; note: string | null; updated_at: string; expires_at: string | null }
-    | undefined
+  const grant = tableExists('rpm_grants')
+    ? (db.prepare(`SELECT rpm, note, updated_at, expires_at FROM rpm_grants WHERE user_id = ?`).get(userId) as
+        | { rpm: number; note: string | null; updated_at: string; expires_at: string | null }
+        | undefined)
+    : undefined
   return {
     planKey: getUserRpmPlanKey(userId),
     rpm: account.rpm,
