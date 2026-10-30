@@ -26,7 +26,7 @@ writeFileSync(
 process.env.DB_PATH = dbPath
 process.env.PROXY_FILE = proxyPath
 
-const { db } = await import('../server/db.ts')
+await import('../server/db.ts')
 const { configuredProxyCount, dispatcherForProxyIndex } = await import('../server/providerProxy.ts')
 const { createProviderKey } = await import('../server/providerKeys.ts')
 const { rotateProviderTargets } = await import('../server/gateway.ts')

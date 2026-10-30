@@ -165,7 +165,7 @@ export function sanitizeErrorMessage(message: unknown): string {
   // 2. Redact Bearer tokens, secrets, API keys
   sanitized = sanitized.replace(/Bearer\s+[a-zA-Z0-9_\-.~+/]+=*/gi, 'Bearer [redacted]')
   sanitized = sanitized.replace(/(?:api[_-]?key|secret|token|password|auth|credential)[=:\s]+[a-zA-Z0-9_\-.~+/]{6,}/gi, 'token=[redacted]')
-  sanitized = sanitized.replace(/\b(apx_|sk-|ghp_|glpat-)[a-zA-Z0-9_\-]{8,}/gi, '[redacted]')
+  sanitized = sanitized.replace(/\b(apx_|sk-|ghp_|glpat-)[a-zA-Z0-9_-]{8,}/gi, '[redacted]')
 
   // 3. Redact server file system paths
   sanitized = sanitized.replace(/(?:\/(?:Users|home|var|etc|opt|srv|app|tmp|root|node_modules)[\w\-./]+)/g, '[redacted_path]')

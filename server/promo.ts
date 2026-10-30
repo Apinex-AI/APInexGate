@@ -1,6 +1,5 @@
 import { randomBytes } from 'node:crypto'
 import { db, id, nowIso } from './db.js'
-import { onUserBalanceCredited } from './userBalanceAlerts.js'
 import { formatTokenCount, formatUsdExact, tokensFromUsdCents } from '../shared/billing.js'
 import { activateSubscription, getActiveSubscription, getSubscriptionPlan, resetFreeTierDailyUsage } from './subscriptions.js'
 import { isSubscriptionPlanKey, type SubscriptionPlanKey } from '../shared/subscriptions.js'
@@ -120,18 +119,6 @@ function parseExpiresAt(raw: string | null | undefined, opts: { requireFuture: b
   if (!Number.isFinite(t)) throw new Error('Invalid expiration datetime')
   if (opts.requireFuture && t <= Date.now()) throw new Error('Expiration must be in the future')
   return new Date(t).toISOString()
-}
-
-function parseRewardAndUses(rewardCentsRaw: number, maxUsesRaw: number) {
-  const rewardCents = Math.round(Number(rewardCentsRaw))
-  const maxUses = Math.round(Number(maxUsesRaw))
-  if (!Number.isFinite(rewardCents) || rewardCents < 1) {
-    throw new Error('Reward must be at least $0.01')
-  }
-  if (!Number.isFinite(maxUses) || maxUses < 1) {
-    throw new Error('Max uses must be at least 1')
-  }
-  return { rewardCents, maxUses }
 }
 
 export function rowFromDb(row: Record<string, unknown>): PromoCodeRow {
@@ -839,11 +826,5 @@ export function redeemPromoCode(input: {
   })
 
   const result = tx.immediate()
-  if (result.type === 'balance') {
-    onUserBalanceCredited(input.userId)
-  } else if (result.type === 'subscription_offer' && result.offerLabel) {
-      } else if (result.type === 'free_reset') {
-      } else if ((result.type === 'subscription' || result.type === 'subscription_custom') && result.planLabel) {
-      }
   return result
 }

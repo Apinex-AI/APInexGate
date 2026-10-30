@@ -32,6 +32,11 @@ import { AdminSubscriptions } from './admin/pages/AdminSubscriptions'
 import { AdminUsage } from './admin/pages/AdminUsage'
 import { AdminStatistics } from './admin/pages/AdminStatistics'
 import { AdminRpm } from './admin/pages/AdminRpm'
+import { AdminPricing } from './admin/pages/AdminPricing'
+import { AdminApiKeys } from './admin/pages/AdminApiKeys'
+import { AdminAuditLogs } from './admin/pages/AdminAuditLogs'
+import { AdminLevels } from './admin/pages/AdminLevels'
+import { AdminEvent } from './admin/pages/AdminEvent'
 import { UserAuth } from './auth/UserAuth'
 import { captureReferralFromUrl } from './auth/referral'
 import { DevelopersLayout } from './developers/DevelopersLayout'
@@ -107,15 +112,20 @@ export default function App() {
               <Route path="/admin" element={<AdminAuthLayout />}>
                 <Route index element={<AdminDashboard />} />
                 <Route path="users" element={<AdminUsers />} />
+                <Route path="api-keys" element={<AdminApiKeys />} />
                 <Route path="providers" element={<AdminProviders />} />
                 <Route path="models" element={<AdminModels />} />
+                <Route path="pricing" element={<AdminPricing />} />
                 <Route path="balances" element={<AdminBalances />} />
                 <Route path="promos" element={<AdminPromos />} />
+                <Route path="promo-event" element={<AdminEvent />} />
+                <Route path="levels" element={<AdminLevels />} />
                 <Route path="settings" element={<AdminSettings />} />
                 <Route path="rpm" element={<AdminRpm />} />
                 <Route path="subscriptions" element={<AdminSubscriptions />} />
                 <Route path="usage" element={<AdminUsage />} />
                 <Route path="statistics" element={<AdminStatistics />} />
+                <Route path="audit-logs" element={<AdminAuditLogs />} />
                 <Route path="*" element={<Navigate to="/admin" replace />} />
               </Route>
             </>

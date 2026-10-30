@@ -908,10 +908,10 @@ Write-Host "Done. Fully quit Hermes Desktop (Quit), then open it again."
 }
 
 const KIMI_MODELS = [
-  { alias: '${SLUG()}/free/kimi-k3', id: 'free/kimi-k3', context: 1_000_000 },
-  { alias: '${SLUG()}/gpt-6-sol', id: 'gpt-6-sol', context: 1_000_000 },
-  { alias: '${SLUG()}/claude-opus-5.5', id: 'claude-opus-5.5', context: 1_000_000 },
-  { alias: '${SLUG()}/grok-4.7', id: 'grok-4.7', context: 500_000 },
+  { alias: `${SLUG()}/free/kimi-k3`, id: 'free/kimi-k3', context: 1_000_000 },
+  { alias: `${SLUG()}/gpt-6.1-sol`, id: 'gpt-6.1-sol', context: 1_000_000 },
+  { alias: `${SLUG()}/claude-opus-5.5`, id: 'claude-opus-5.5', context: 1_000_000 },
+  { alias: `${SLUG()}/grok-4.7`, id: 'grok-4.7', context: 500_000 },
 ] as const
 
 function kimiToml(keyExpression: string) {
@@ -966,8 +966,8 @@ file = pathlib.Path(path)
 file.write_text(file.read_text().replace("$KEY", key))
 PY
 echo "Wrote $CONFIG"
-echo "Models: free/kimi-k3, gpt-6-sol, claude-opus-5.5, grok-4.7"
-echo "Try: kimi -p 'Reply with the single word pong' -m ${SLUG()}/gpt-6-sol"
+echo "Models: free/kimi-k3, gpt-6.1-sol, claude-opus-5.5, grok-4.7"
+echo "Try: kimi -p 'Reply with the single word pong' -m ${SLUG()}/gpt-6.1-sol"
 `
 }
 
@@ -995,8 +995,8 @@ ${kimiToml('$key')}
 $toml = $toml.Replace('$key', $key)
 [System.IO.File]::WriteAllText($configPath, $toml)
 Write-Host "Wrote $configPath"
-Write-Host "Models: free/kimi-k3, gpt-6-sol, claude-opus-5.5, grok-4.7"
-Write-Host "Try: kimi -p 'Reply with the single word pong' -m ${SLUG()}/gpt-6-sol"
+Write-Host "Models: free/kimi-k3, gpt-6.1-sol, claude-opus-5.5, grok-4.7"
+Write-Host "Try: kimi -p 'Reply with the single word pong' -m ${SLUG()}/gpt-6.1-sol"
 `
 }
 

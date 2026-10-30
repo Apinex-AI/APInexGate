@@ -47,7 +47,9 @@ export function AdminPricing() {
                   () =>
                     adminApi.updatePricing(
                       model.id,
-                      {
+                      model.provider === 'Free'
+                        ? { tokenWeight: value.tokenWeight ?? 1 }
+                        : {
                             inputDollarsPer1M: value.inputDollarsPer1M ?? 0,
                             outputDollarsPer1M: value.outputDollarsPer1M ?? 0,
                           },
@@ -78,16 +80,19 @@ function PricingCard({
   const storedOutput = storedOutputRaw > 0 ? storedOutputRaw : storedInput
   const [inputPrice, setInputPrice] = useState(priceField(storedInput))
   const [outputPrice, setOutputPrice] = useState(priceField(storedOutput))
+  const [tokenWeight, setTokenWeight] = useState(String(model.token_weight ?? 1))
 
   useEffect(() => {
     const nextInput = Math.max(0, Number(model.input_price_micros) || 0) / 1_000_000
     const nextOutputRaw = Math.max(0, Number(model.output_price_micros) || 0) / 1_000_000
     setInputPrice(priceField(nextInput))
     setOutputPrice(priceField(nextOutputRaw > 0 ? nextOutputRaw : nextInput))
-  }, [model.id, model.provider, model.input_price_micros, model.output_price_micros])
+    setTokenWeight(String(model.token_weight ?? 1))
+  }, [model.id, model.provider, model.input_price_micros, model.output_price_micros, model.token_weight])
 
   const parsedInput = Number(inputPrice)
   const parsedOutput = Number(outputPrice)
+  const parsedWeight = Number(tokenWeight)
 
   return (
     <article className={`admin-card pricing-card pricing-card-${providerSlug(model.provider)}`}>
@@ -105,8 +110,17 @@ function PricingCard({
       <div className="pricing-fields">
         {isFree ? (
           <div className="field">
-            <label>FREE Token Weight</label>
-            <p className="field-hint">Weight for free model accounting.</p>
+            <label htmlFor={`weight-${model.id}`}>FREE Multiplier (Token Weight)</label>
+            <input
+              id={`weight-${model.id}`}
+              className="input"
+              type="number"
+              min="0.1"
+              step="0.5"
+              value={tokenWeight}
+              onChange={(event) => setTokenWeight(event.target.value)}
+            />
+            <p className="field-hint">Multiplier deducted from the daily free token allowance (e.g. 1x, 2x, 3x).</p>
           </div>
         ) : (
           <>
@@ -136,9 +150,13 @@ function PricingCard({
       <button
         className="btn btn-secondary btn-sm"
         type="button"
-        disabled={busy || isFree}
+        disabled={busy}
         onClick={() => {
-          if (isFree) return
+          if (isFree) {
+            if (!Number.isFinite(parsedWeight) || parsedWeight <= 0) return
+            onSave({ tokenWeight: parsedWeight })
+            return
+          }
           if (!Number.isFinite(parsedInput) || parsedInput < 0.01) return
           if (!Number.isFinite(parsedOutput) || parsedOutput < 0.01) return
           onSave({ inputDollarsPer1M: parsedInput, outputDollarsPer1M: parsedOutput })

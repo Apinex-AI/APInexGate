@@ -7,11 +7,8 @@ import {
   isValidModelName,
   displayNameFromId,
   sanitizeModelName,
-  MODEL_ID_REGEX,
-  FORBIDDEN_NAME_CHARS_REGEX,
 } from '../shared/modelValidation.js'
 import { db, nowIso } from '../server/db.js'
-import { importApinexCatalogModels } from '../server/providerKeys.js'
 import { registerRoutes } from '../server/routes.js'
 import { createAdminSession, ADMIN_SESSION_COOKIE } from '../server/auth.js'
 
@@ -181,7 +178,7 @@ test('defense-in-depth: importApinexCatalogModels skips invalid IDs and sanitize
   const evilName = 'Evil Model $(id > /tmp/marker)'
   const safeName = sanitizeModelName(evilName, 'free/safe-fallback')
   assert.equal(safeName, 'Evil Model (id /tmp/marker)')
-  assert.doesNotMatch(safeName, /[\$`;&|<>\\"]/)
+  assert.doesNotMatch(safeName, /[$`;&|<>\\"]/)
   assert.equal(isValidModelName(safeName), true)
 })
 
@@ -235,9 +232,10 @@ test('admin model routes enforce validation on model creation and updates', asyn
     assert.equal(resEvilId.statusCode, 400)
     assert.equal(resEvilId.json().error, 'API model id may only use letters, numbers, ., _, :, /, -')
 
-    // 3. POST /api/admin/models with valid ID and name -> 200
+    // 3. POST /api/admin/models with valid ID, name, and custom tokenWeight -> 200
     const testModelId = 'free/test-validated-model'
     db.prepare('DELETE FROM model_catalog WHERE id = ?').run(testModelId)
+    db.prepare('DELETE FROM pricing_rules WHERE model_id = ?').run(testModelId)
 
     const resValid = await app.inject({
       method: 'POST',
@@ -250,12 +248,33 @@ test('admin model routes enforce validation on model creation and updates', asyn
         id: testModelId,
         name: 'Validated Model 1.0 (Test)',
         provider: 'Free',
+        tokenWeight: 3,
       },
     })
     assert.equal(resValid.statusCode, 200)
     assert.equal(resValid.json().ok, true)
 
-    // 4. PATCH /api/admin/models/* with malicious name -> 400
+    const createdModel = db.prepare('SELECT token_weight, provider FROM model_catalog WHERE id = ?').get(testModelId) as { token_weight: number; provider: string }
+    assert.equal(createdModel.token_weight, 3, 'Expected token_weight to be 3')
+    assert.equal(createdModel.provider, 'Free')
+
+    // 4. PATCH /api/admin/models/* with custom tokenWeight -> 200 and saves token_weight = 5
+    const resPatchWeight = await app.inject({
+      method: 'PATCH',
+      url: `/api/admin/models/${encodeURIComponent(testModelId)}`,
+      headers: {
+        host: 'localhost',
+        cookie: cookieHeader,
+      },
+      payload: {
+        tokenWeight: 5,
+      },
+    })
+    assert.equal(resPatchWeight.statusCode, 200)
+    const updatedModel = db.prepare('SELECT token_weight FROM model_catalog WHERE id = ?').get(testModelId) as { token_weight: number }
+    assert.equal(updatedModel.token_weight, 5, 'Expected updated token_weight to be 5')
+
+    // 5. PATCH /api/admin/models/* with malicious name -> 400
     const resPatchEvilName = await app.inject({
       method: 'PATCH',
       url: `/api/admin/models/${encodeURIComponent(testModelId)}`,

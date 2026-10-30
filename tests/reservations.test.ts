@@ -106,7 +106,7 @@ test('expiry job frees abandoned holds', () => {
   assert.equal(after.reserved_tokens, 0)
 })
 
-test('Anthropic models reject users without a top-up even if they have bonus balance', () => {
+test('users with bonus balance can reserve tokens unconditionally (no Anthropic restriction)', () => {
   const at = new Date().toISOString()
   db.prepare(
     `INSERT INTO users (id,name,email,plan,status,balance_cents,balance_tokens,restricted_tokens,requests,created_at)
@@ -117,30 +117,12 @@ test('Anthropic models reject users without a top-up even if they have bonus bal
      VALUES ('k_bonus','u_bonus_only','K','apx_test','active',?,'hash2',0,null,0)`,
   ).run(at)
 
-  // Disallow restricted credits (Anthropic model) without top-up
+  // Users with bonus balance can reserve tokens unconditionally without top-up
   const res = tryReserveTokens({
     userId: 'u_bonus_only',
     apiKeyId: 'k_bonus',
     amount: 1000,
-    allowRestrictedCredits: false,
   })
-  assert.equal(res.ok, false)
-  assert.match((res as { error: string }).error, /Anthropic models/i)
-
-  // Now simulate a top-up
-  db.prepare(
-    `INSERT INTO crypto_payments (id, user_id, provider, order_id, amount_cents, currency, status, credited_at, created_at, updated_at)
-     VALUES ('pay_1', 'u_bonus_only', 'solana', 'ord_1', 500, 'USD', 'finished', ?, ?, ?)`,
-  ).run(at, at, at)
-  // Give regular balance
-  db.prepare(`UPDATE users SET balance_tokens = 500000, restricted_tokens = 0 WHERE id = 'u_bonus_only'`).run()
-
-  const resAfterTopup = tryReserveTokens({
-    userId: 'u_bonus_only',
-    apiKeyId: 'k_bonus',
-    amount: 1000,
-    allowRestrictedCredits: false,
-  })
-  assert.equal(resAfterTopup.ok, true)
-  if (resAfterTopup.ok) releaseReservation(resAfterTopup.reservationId)
+  assert.equal(res.ok, true)
+  if (res.ok) releaseReservation(res.reservationId)
 })

@@ -108,13 +108,23 @@ function queryMedianLatency(window: ModelUsageWindow, now = new Date()) {
   return new Map(rows.map((row) => [row.model_id, Math.round(Number(row.median_latency_ms) || 0)]))
 }
 
-type CatalogInfo = { provider: string; tokenWeight: number; name: string; status: string; upstreamProvider: string }
+export type CatalogInfo = {
+  provider: string
+  tokenWeight: number
+  name: string
+  status: string
+  upstreamProvider: string
+  inputPriceMicros: number
+  outputPriceMicros: number
+}
 
 function catalogInfo() {
   const rows = db
     .prepare(
       `SELECT id, provider, name, status, COALESCE(token_weight, 1) AS token_weight,
-              COALESCE(upstream_provider, 'apinex') AS upstream_provider
+              COALESCE(upstream_provider, 'apinex') AS upstream_provider,
+              COALESCE(input_price_micros, 0) AS input_price_micros,
+              COALESCE(output_price_micros, 0) AS output_price_micros
        FROM model_catalog`,
     )
     .all() as Array<{
@@ -124,6 +134,8 @@ function catalogInfo() {
     status: string
     token_weight: number
     upstream_provider: string
+    input_price_micros: number
+    output_price_micros: number
   }>
   return new Map<string, CatalogInfo>(
     rows.map((row) => [
@@ -134,6 +146,8 @@ function catalogInfo() {
         name: row.name,
         status: row.status,
         upstreamProvider: row.upstream_provider,
+        inputPriceMicros: Number(row.input_price_micros),
+        outputPriceMicros: Number(row.output_price_micros),
       },
     ]),
   )
@@ -166,12 +180,19 @@ export type ModelUsageRow = {
   lastUsedAt: string | null
 }
 
-function classify(modelId: string, provider: string, info?: CatalogInfo): ModelUsageRow['kind'] {
+export function classify(modelId: string, provider: string, info?: CatalogInfo): ModelUsageRow['kind'] {
   if (TOOL_PROVIDERS.has(provider) || /^(web\.|twitter\.|voice\.|solana\.|captcha\.)/.test(modelId)) return 'tool'
-  if (modelId.toLowerCase().startsWith('free/') || provider.toLowerCase() === 'free' || info?.provider?.toLowerCase() === 'free') {
+  if (
+    modelId.toLowerCase().startsWith('free/') ||
+    provider.toLowerCase() === 'free' ||
+    info?.provider?.toLowerCase() === 'free'
+  ) {
     return 'free'
   }
-  if (info) return info.tokenWeight === 0 ? 'free' : 'paid'
+  if (info) {
+    const isZeroPrice = info.inputPriceMicros === 0 && info.outputPriceMicros === 0
+    return isZeroPrice ? 'free' : 'paid'
+  }
   // Deleted from the catalog: the `free/` namespace still identifies zero-cost routes.
   return modelId.toLowerCase().startsWith('free/') ? 'free' : 'paid'
 }
@@ -336,7 +357,7 @@ function topUsers(window: ModelUsageWindow, now = new Date(), limit = 25) {
        SELECT u.display_id AS userId,
               u.email,
               u.name,
-              u.solana_wallet AS wallet,
+              NULL AS wallet,
               top.requests, top.errors, top.costTokens, top.totalTokens, top.models, top.lastUsedAt
        FROM top
        JOIN users u ON u.id = top.user_id

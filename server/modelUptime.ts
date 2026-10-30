@@ -3,16 +3,16 @@ import { PROVIDER_ORDER } from '../shared/providers.js'
 
 export const UPTIME_HOURS = 24 * 7
 
-export type HourState = 'up' | 'load' | 'partial' | 'down' | 'none'
+export type HourState = 'up' | 'load' | 'partial' | 'down' | 'none' | 'no_data'
 
-export type PublicModelState = 'operational' | 'degraded' | 'partial' | 'outage' | 'unknown'
+export type PublicModelState = 'operational' | 'degraded' | 'partial' | 'outage' | 'unknown' | 'no_data'
 
 const LOAD_LATENCY_MS = 25_000
 const MIN_SAMPLE = 3
 
 export function classifyHour(input: { total: number; ok: number; avgLatencyMs: number | null }): HourState {
   const total = input.total
-  if (total <= 0) return 'up'
+  if (total <= 0) return 'no_data'
   if (total < MIN_SAMPLE) return input.ok === total ? 'up' : 'none'
   const rate = input.ok / total
   if (rate < 0.5) return 'down'
@@ -26,6 +26,7 @@ export function publicStateFromHour(state: HourState): PublicModelState {
   if (state === 'load') return 'degraded'
   if (state === 'partial') return 'partial'
   if (state === 'down') return 'outage'
+  if (state === 'no_data' || state === 'none') return 'no_data'
   return 'unknown'
 }
 
@@ -34,7 +35,7 @@ export function uptimePercent(hours: HourState[]): number | null {
   let weight = 0
   let observed = 0
   for (const hour of hours) {
-    if (hour === 'none') continue
+    if (hour === 'none' || hour === 'no_data') continue
     observed += 1
     if (hour === 'up' || hour === 'load') weight += 1
     else if (hour === 'partial') weight += 0.5
@@ -116,10 +117,12 @@ export function buildModelUptime(now = new Date()) {
         })
         return { at: slot.toISOString(), state }
       })
-      let latest: HourState = 'none'
+      let latest: HourState = 'no_data'
+      let hasSamples = false
       for (let index = hours.length - 1; index >= 0; index -= 1) {
-        if (hours[index].state !== 'none') {
+        if (hours[index].state !== 'none' && hours[index].state !== 'no_data') {
           latest = hours[index].state
+          hasSamples = true
           break
         }
       }
@@ -127,7 +130,7 @@ export function buildModelUptime(now = new Date()) {
         id: model.id,
         name: model.name,
         provider: model.provider,
-        state: publicStateFromHour(latest),
+        state: hasSamples ? publicStateFromHour(latest) : 'no_data',
         uptimePct: uptimePercent(hours.map((hour) => hour.state)),
         hours,
       }

@@ -3,15 +3,20 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   IconActivity,
   IconCube,
+  IconEvent,
+  IconGauge,
   IconGrid,
+  IconKey,
+  IconLevels,
   IconPlug,
   IconPulse,
   IconRefresh,
   IconSettings,
+  IconShield,
+  IconTag,
   IconTicket,
   IconUsers,
   IconWallet,
-  IconGauge,
 } from './Icons'
 import { BrandName } from '../components/BrandName'
 import './AdminLayout.css'
@@ -19,15 +24,20 @@ import './AdminLayout.css'
 const sections = [
   { to: '/admin', label: 'Dashboard', end: true, icon: IconGrid },
   { to: '/admin/users', label: 'Users', end: false, icon: IconUsers },
+  { to: '/admin/api-keys', label: 'API Keys', end: false, icon: IconKey },
   { to: '/admin/providers', label: 'Providers', end: false, icon: IconPlug },
   { to: '/admin/models', label: 'Models', end: false, icon: IconCube },
+  { to: '/admin/pricing', label: 'Pricing', end: false, icon: IconTag },
   { to: '/admin/balances', label: 'Balances', end: false, icon: IconWallet },
   { to: '/admin/promos', label: 'Promo Codes', end: false, icon: IconTicket },
+  { to: '/admin/promo-event', label: 'Event', end: false, icon: IconEvent },
+  { to: '/admin/levels', label: 'Levels', end: false, icon: IconLevels },
   { to: '/admin/settings', label: 'Settings', end: false, icon: IconSettings },
   { to: '/admin/rpm', label: 'RPM', end: false, icon: IconGauge },
   { to: '/admin/subscriptions', label: 'Subscriptions', end: false, icon: IconRefresh },
   { to: '/admin/usage', label: 'Usage', end: false, icon: IconPulse },
-  { to: '/admin/statistics', label: 'Statistics', end: false, icon: IconActivity }, 
+  { to: '/admin/statistics', label: 'Statistics', end: false, icon: IconActivity },
+  { to: '/admin/audit-logs', label: 'Audit Logs', end: false, icon: IconShield },
 ]
 
 export function AdminLayout() {

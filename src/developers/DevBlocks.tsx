@@ -1,9 +1,7 @@
 import { useState, type ReactNode } from 'react'
-import { apiBase, apiOrigin, getBrand, siteName } from '../lib/brand'
+import { apiBase, apiOrigin } from '../lib/brand'
 
 export { apiBase as API_BASE, apiOrigin as API_ORIGIN }
-export const SITE_URL = () => getBrand().siteUrl
-export { siteName }
 
 export type ParamRow = {
   name: string

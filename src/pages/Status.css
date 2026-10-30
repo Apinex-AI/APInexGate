@@ -360,6 +360,11 @@
   box-shadow: 0 0 6px rgba(248, 113, 113, 0.4);
 }
 
+.status-bar.is-none,
+.status-bar.is-no_data {
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .status-timeline-legend {
   display: flex;
   justify-content: space-between;
@@ -430,11 +435,15 @@
   background: #ef4444;
 }
 
-.status-state-pill.is-unknown {
+.status-state-pill.is-unknown,
+.status-state-pill.is-no_data,
+.status-state-pill.is-none {
   background: rgba(255, 255, 255, 0.06);
   color: #94a3b8;
 }
-.status-state-pill.is-unknown .state-indicator-dot {
+.status-state-pill.is-unknown .state-indicator-dot,
+.status-state-pill.is-no_data .state-indicator-dot,
+.status-state-pill.is-none .state-indicator-dot {
   background: #64748b;
 }
 

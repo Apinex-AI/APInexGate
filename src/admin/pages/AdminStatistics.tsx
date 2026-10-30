@@ -7,6 +7,7 @@ import './AdminPages.css'
 const CHART_UP = '#b388ff'
 const CHART_DOWN = '#E87979'
 const CHART_FLAT = '#8BA3B7'
+const CHART_PADDING = { top: 18, right: 18, bottom: 28, left: 12 } as const
 
 type Tab =
   | 'statistics'
@@ -240,9 +241,9 @@ function SoftChart({ title, unit, points, moneyMode }: SoftChartProps) {
 
   const width = 920
   const height = 220
-  const padding = { top: 18, right: 18, bottom: 28, left: 12 }
-  const chartWidth = width - padding.left - padding.right
-  const chartHeight = height - padding.top - padding.bottom
+  const padding = CHART_PADDING
+  const chartWidth = width - CHART_PADDING.left - CHART_PADDING.right
+  const chartHeight = height - CHART_PADDING.top - CHART_PADDING.bottom
 
   const values = points.map((p) => Number(p.value) || 0)
   const minValue = values.length ? Math.min(...values) : 0
@@ -256,9 +257,9 @@ function SoftChart({ title, unit, points, moneyMode }: SoftChartProps) {
       return [
         {
           ...points[0],
-          x: padding.left + chartWidth / 2,
+          x: CHART_PADDING.left + chartWidth / 2,
           y:
-            padding.top +
+            CHART_PADDING.top +
             chartHeight -
             ((value - minValue) / valueRange) * (chartHeight * 0.78) -
             chartHeight * 0.1,
@@ -267,9 +268,9 @@ function SoftChart({ title, unit, points, moneyMode }: SoftChartProps) {
     }
     return points.map((point, index) => {
       const value = Number(point.value) || 0
-      const x = padding.left + (chartWidth * index) / (points.length - 1)
+      const x = CHART_PADDING.left + (chartWidth * index) / (points.length - 1)
       const y =
-        padding.top +
+        CHART_PADDING.top +
         chartHeight -
         ((value - minValue) / valueRange) * (chartHeight * 0.78) -
         chartHeight * 0.1

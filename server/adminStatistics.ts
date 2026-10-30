@@ -48,13 +48,6 @@ function emptyPay(): PayAgg {
   return { buys: 0, usd: 0, sol: 0, tokensSold: 0 }
 }
 
-function addPay(target: PayAgg, row: PayAgg) {
-  target.buys += row.buys
-  target.usd = money(target.usd + row.usd)
-  target.sol = money(target.sol + row.sol)
-  target.tokensSold = money((target.tokensSold ?? 0) + (row.tokensSold ?? 0))
-}
-
 function payFromRow(row: {
   buys?: number
   usd?: number
@@ -130,16 +123,6 @@ function sumPaymentTable(
         THEN ${hasRaw ? `CAST(COALESCE(expected_raw_amount, '0') AS REAL) / 1000000000.0` : '0'}
       WHEN ${hasPay ? `CAST(COALESCE(pay_amount, '0') AS REAL) >= 1000` : '0'}
         THEN ${hasPay ? `CAST(COALESCE(pay_amount, '0') AS REAL) / 1000000000.0` : '0'}
-      ELSE ${hasPay ? `CAST(COALESCE(pay_amount, '0') AS REAL)` : '0'}
-    END`
-      : '0'
-  const skrAmountExpr =
-    hasRaw || hasPay
-      ? `CASE
-      WHEN ${hasRaw ? `CAST(COALESCE(expected_raw_amount, '0') AS REAL) > 0` : '0'}
-        THEN ${hasRaw ? `CAST(COALESCE(expected_raw_amount, '0') AS REAL) / 1000000.0` : '0'}
-      WHEN ${hasPay ? `CAST(COALESCE(pay_amount, '0') AS REAL) >= 1000000` : '0'}
-        THEN ${hasPay ? `CAST(COALESCE(pay_amount, '0') AS REAL) / 1000000.0` : '0'}
       ELSE ${hasPay ? `CAST(COALESCE(pay_amount, '0') AS REAL)` : '0'}
     END`
       : '0'
@@ -571,27 +554,25 @@ export async function buildAdminStatistics(input: {
   const formatRefIdentity = (row: {
     domain?: string | null
     email?: string | null
-    wallet?: string | null
     name?: string | null
     userId?: number | string | null
-  }) => row.domain || row.email || row.wallet || row.name || row.userId || '—'
+  }) => row.domain || row.email || row.name || row.userId || '—'
 
   if (needle) {
     const like = `%${needle}%`
     const owner = db
       .prepare(
-        `SELECT id, display_id AS userId, name, email, solana_wallet AS wallet
+        `SELECT id, display_id AS userId, name, email
          FROM users
-         WHERE email LIKE ? OR solana_wallet LIKE ? OR CAST(display_id AS TEXT) = ?
+         WHERE email LIKE ? OR CAST(display_id AS TEXT) = ?
          LIMIT 1`,
       )
-      .get(like, like, needle) as
+      .get(like, needle) as
       | {
           id?: string
           userId?: number
           name?: string | null
           email?: string | null
-          wallet?: string | null
         }
       | undefined
 
@@ -599,7 +580,6 @@ export async function buildAdminStatistics(input: {
       const invited = db
         .prepare(
           `SELECT u.display_id AS referralId, u.name AS referralName, u.email AS referralEmail,
-                  u.solana_wallet AS referralWallet,
                   u.created_at AS date
            FROM users u
            WHERE u.referred_by = ?
@@ -611,13 +591,11 @@ export async function buildAdminStatistics(input: {
         id: index + 1,
         referral: formatRefIdentity({
           email: row.referralEmail as string | null,
-          wallet: row.referralWallet as string | null,
           name: row.referralName as string | null,
           userId: row.referralId as number | null,
         }),
         referer: formatRefIdentity({
           email: owner.email,
-          wallet: owner.wallet,
           name: owner.name,
           userId: owner.userId,
         }),
@@ -632,12 +610,10 @@ export async function buildAdminStatistics(input: {
            r.display_id AS referralId,
            r.name AS referralName,
            r.email AS referralEmail,
-           r.solana_wallet AS referralWallet,
            r.created_at AS date,
            f.display_id AS refererId,
            f.name AS refererName,
-           f.email AS refererEmail,
-           f.solana_wallet AS refererWallet
+           f.email AS refererEmail
          FROM users r
          JOIN users f ON f.id = r.referred_by
          WHERE r.referred_by IS NOT NULL AND r.referred_by != ''
@@ -651,14 +627,12 @@ export async function buildAdminStatistics(input: {
       referral: formatRefIdentity({
         domain: row.referralDomain as string | null,
         email: row.referralEmail as string | null,
-        wallet: row.referralWallet as string | null,
         name: row.referralName as string | null,
         userId: row.referralId as number | null,
       }),
       referer: formatRefIdentity({
         domain: row.refererDomain as string | null,
         email: row.refererEmail as string | null,
-        wallet: row.refererWallet as string | null,
         name: row.refererName as string | null,
         userId: row.refererId as number | null,
       }),

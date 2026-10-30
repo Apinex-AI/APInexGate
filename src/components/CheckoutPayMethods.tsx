@@ -3,7 +3,7 @@ import { formatUsdExact, tokensFromUsd, usdFromTokens } from '../../shared/billi
 
 export type ShopPayMethod = 'crypto' | 'balance'
 
-export function canCoverWithBalance(balanceTokens: number, amountUsd: number) {
+function canCoverWithBalance(balanceTokens: number, amountUsd: number) {
   const need = tokensFromUsd(amountUsd)
   return need > 0 && Math.floor(Number(balanceTokens) || 0) >= need
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Modal } from '../../components/Modal'
 import { adminApi } from '../api'
 import type { AdminUserRecord } from '../types'
@@ -46,10 +46,12 @@ export function AdminUsers() {
   const [loadingMore, setLoadingMore] = useState(false)
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const loadVersion = useRef(0)
+  const usersLengthRef = useRef(users.length)
+  usersLengthRef.current = users.length
 
-  const loadUsers = (reset: boolean, search = query) => {
+  const loadUsers = useCallback((reset: boolean, search = query) => {
     const version = ++loadVersion.current
-    const offset = reset ? 0 : users.length
+    const offset = reset ? 0 : usersLengthRef.current
     if (!reset) setLoadingMore(true)
     return adminApi.users({ limit: 100, offset, q: search, sort: sortKey, dir: sortDir }).then((data) => {
       if (version !== loadVersion.current) return
@@ -57,13 +59,13 @@ export function AdminUsers() {
       setTotal(data.total)
       setHasMore(data.hasMore)
     }).catch(() => undefined).finally(() => { if (version === loadVersion.current) setLoadingMore(false) })
-  }
+  }, [query, sortKey, sortDir])
 
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current)
     searchTimer.current = setTimeout(() => { void loadUsers(true, query) }, 180)
     return () => { if (searchTimer.current) clearTimeout(searchTimer.current) }
-  }, [query, sortKey, sortDir])
+  }, [loadUsers, query])
 
   useEffect(() => {
     const onScroll = () => {
@@ -73,7 +75,7 @@ export function AdminUsers() {
     }
     window.addEventListener('scroll', onScroll, { passive: true })
     return () => window.removeEventListener('scroll', onScroll)
-  }, [hasMore, loadingMore, users.length, query, sortKey, sortDir])
+  }, [hasMore, loadingMore, loadUsers])
 
   const refresh = () => loadUsers(true)
   const { run, busy } = useAdminMutation(refresh)

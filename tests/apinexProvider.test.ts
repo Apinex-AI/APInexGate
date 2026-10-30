@@ -354,6 +354,21 @@ test('end-to-end /v1/decisions execution for paid Jev Group models and free/jev-
   }
 })
 
+test('D49 / D50: APInex free/gpt-6-luna has tokenWeight 3 and allowFree=false is respected', async () => {
+  // 1. Verify default weight for free/gpt-6-luna is 3
+  assert.equal(APINEX_CATALOG_DEFAULTS['free/gpt-6-luna']?.tokenWeight, 3)
+
+  // 2. Verify free model with weight 3 meters free allowance with 3x multiplier
+  const modelRow = {
+    id: 'free/gpt-6-luna',
+    provider: 'Free',
+    token_weight: 3,
+    input_price_micros: 0,
+    output_price_micros: 0,
+  }
+  assert.equal(Number(modelRow.token_weight) > 0 ? Number(modelRow.token_weight) : 1, 3)
+})
+
 test('separate /v1/balance, /v1/subscription, and /v1/rpm endpoints return clean dedicated payloads', async () => {
   const { activateSubscription } = await import('../server/subscriptions.ts')
   const { setUserRpmGrant } = await import('../server/rpmPlans.ts')

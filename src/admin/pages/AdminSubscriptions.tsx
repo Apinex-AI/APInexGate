@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { adminApi, type AdminSubscriptionKind, type AdminSubscriptionsOverview } from '../api'
 import { AdminPageHeader, useAdminMutation } from '../AdminShared'
 import { formatFullTokenCount, formatTokenCount } from '../../../shared/billing'
@@ -43,7 +43,7 @@ export function AdminSubscriptions() {
   const [grantPlan, setGrantPlan] = useState('day1')
   const [loading, setLoading] = useState(true)
 
-  const refresh = () => {
+  const refresh = useCallback(() => {
     void adminApi
       .subscriptionsOverview()
       .then((result) => {
@@ -67,9 +67,11 @@ export function AdminSubscriptions() {
       })
       .catch(() => toast('Could not load subscriptions', 'error'))
       .finally(() => setLoading(false))
-  }
+  }, [toast])
 
-  useEffect(refresh, [])
+  useEffect(() => {
+    refresh()
+  }, [refresh])
   const { run, busy } = useAdminMutation(refresh)
 
   function saveAllowance() {

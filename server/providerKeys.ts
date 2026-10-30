@@ -638,6 +638,7 @@ export type CatalogModel = {
   inputPrice: number
   outputPrice: number
   tokenWeight?: number
+  allowFree?: boolean
 }
 
 type ApinexCatalogSpec = {
@@ -647,6 +648,7 @@ type ApinexCatalogSpec = {
   dollarsPer1M: number
   outputDollarsPer1M?: number
   tokenWeight: number
+  allowFree?: boolean
 }
 
 export const APINEX_CATALOG_DEFAULTS: Record<string, ApinexCatalogSpec> = {
@@ -682,7 +684,7 @@ export const APINEX_CATALOG_DEFAULTS: Record<string, ApinexCatalogSpec> = {
   'free/deepseek-v4.1-flash': { name: 'Deepseek V4.1 Flash', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
   'free/deepseek-v4-flash-0731': { name: 'Deepseek V4 Flash', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
   'free/deepseek-v4-pro-0813': { name: 'Deepseek V4 Pro', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
-  'free/gpt-6-luna': { name: 'Gpt 6 Luna', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
+  'free/gpt-6-luna': { name: 'Gpt 6 Luna', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 3 },
   'free/glm-5.3-flash': { name: 'GLM-5.3 Flash', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
   'free/mimo-v2.6-pro': { name: 'Mimo V2.6 Pro', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
   'free/minimax-m3.1': { name: 'MiniMax M3.1', provider: 'Free', contextWindow: '1M', dollarsPer1M: 0, tokenWeight: 1 },
@@ -718,18 +720,20 @@ async function fetchApinexPublicMetadata(proxyIndex: number | null = null): Prom
         weight?: unknown
         dollarsPer1M?: unknown
         outputDollarsPer1M?: unknown
+        allowFree?: unknown
       }>
     }
     for (const item of payload.models ?? []) {
       const modelId = String(item.id ?? '').trim()
       if (!modelId || !isValidModelId(modelId)) continue
-      const isFree = modelId.startsWith('free/') || String(item.provider ?? '').trim().toLowerCase() === 'free'
+      const allowFree = item.allowFree !== false
       const rawProvider = String(item.provider ?? '').trim()
+      const isFree = allowFree && (modelId.startsWith('free/') || rawProvider.toLowerCase() === 'free')
       const provider: ModelCategory = isFree
         ? 'Free'
         : isDecisionCatalogModelId(modelId) || rawProvider.toLowerCase() === 'jev group' || rawProvider.toLowerCase() === 'jev'
           ? 'Jev Group'
-          : (MODEL_CATEGORIES.find((c) => c.toLowerCase() === rawProvider.toLowerCase()) ??
+          : (MODEL_CATEGORIES.find((c) => c.toLowerCase() === rawProvider.toLowerCase() && c.toLowerCase() !== 'free') ??
              familyFromUpstreamId(modelId) ??
              'GPT')
       const dollars = Number(item.dollarsPer1M)
@@ -749,13 +753,17 @@ async function fetchApinexPublicMetadata(proxyIndex: number | null = null): Prom
             ? 0
             : resolvedInput
       const safeName = sanitizeModelName(item.name, modelId)
+      const tokenWeight = isFree
+        ? (Number.isFinite(weight) && weight > 0 ? weight : (map.get(modelId)?.tokenWeight ?? 1))
+        : 0
       map.set(modelId, {
         name: safeName,
         provider,
         contextWindow: String(item.contextWindow ?? '').trim() || '1M',
         dollarsPer1M: resolvedInput,
         outputDollarsPer1M: resolvedOutput,
-        tokenWeight: isFree ? (Number.isFinite(weight) && weight > 0 ? weight : (map.get(modelId)?.tokenWeight ?? 1)) : 0,
+        tokenWeight,
+        allowFree,
       })
     }
   } catch {
@@ -819,12 +827,13 @@ export async function fetchCatalogModels(
         if (!modelId || seen.has(modelId) || !isValidModelId(modelId)) continue
         seen.add(modelId)
         const spec = publicMeta.get(modelId)
-        const isFree = modelId.startsWith('free/') || spec?.provider === 'Free'
+        const allowFree = spec?.allowFree !== false
+        const isFree = allowFree && (modelId.startsWith('free/') || spec?.provider === 'Free')
         const resolvedProvider: ModelCategory = isFree
           ? 'Free'
           : isDecisionCatalogModelId(modelId) || spec?.provider === 'Jev Group'
             ? 'Jev Group'
-            : (spec?.provider ?? familyFromUpstreamId(modelId) ?? 'GPT')
+            : (spec?.provider && spec.provider !== 'Free' ? spec.provider : (familyFromUpstreamId(modelId) ?? 'GPT'))
         const price = spec?.dollarsPer1M ?? (isFree ? 0 : 0.1)
         const outPrice = spec?.outputDollarsPer1M !== undefined ? spec.outputDollarsPer1M : (resolvedProvider === 'Jev Group' ? 0 : price)
         const rawName = String(item.name ?? '').trim() || spec?.name || displayNameFromId(modelId)
@@ -836,21 +845,30 @@ export async function fetchCatalogModels(
           contextWindow: item.context_window ? String(item.context_window) : (spec?.contextWindow ?? '1M'),
           inputPrice: price,
           outputPrice: outPrice,
-          tokenWeight: isFree ? (spec?.tokenWeight ?? 1) : 0,
+          tokenWeight: isFree ? (spec?.tokenWeight && spec.tokenWeight > 0 ? spec.tokenWeight : 1) : 0,
+          allowFree,
         })
       }
       for (const [modelId, spec] of publicMeta.entries()) {
         if (seen.has(modelId) || !isValidModelId(modelId)) continue
         seen.add(modelId)
         const safeName = sanitizeModelName(spec.name, modelId)
+        const allowFree = spec.allowFree !== false
+        const isFree = allowFree && (modelId.startsWith('free/') || spec.provider === 'Free')
+        const resolvedProvider: ModelCategory = isFree
+          ? 'Free'
+          : isDecisionCatalogModelId(modelId) || spec.provider === 'Jev Group'
+            ? 'Jev Group'
+            : (spec.provider !== 'Free' ? spec.provider : (familyFromUpstreamId(modelId) ?? 'GPT'))
         models.push({
           id: modelId,
           name: safeName,
-          provider: spec.provider,
+          provider: resolvedProvider,
           contextWindow: spec.contextWindow,
           inputPrice: spec.dollarsPer1M,
-          outputPrice: spec.outputDollarsPer1M ?? (spec.provider === 'Jev Group' ? 0 : spec.dollarsPer1M),
-          tokenWeight: spec.tokenWeight,
+          outputPrice: spec.outputDollarsPer1M ?? (resolvedProvider === 'Jev Group' ? 0 : spec.dollarsPer1M),
+          tokenWeight: isFree ? (spec.tokenWeight && spec.tokenWeight > 0 ? spec.tokenWeight : 1) : 0,
+          allowFree,
         })
       }
       const filtered =
@@ -908,9 +926,16 @@ export async function importApinexCatalogModels(): Promise<{
     for (const item of items) {
       if (!isValidModelId(item.id)) continue
       const safeName = sanitizeModelName(item.name, item.id)
-      const isFree = item.provider === 'Free' || item.id.startsWith('free/')
+      const allowFree = item.allowFree !== false
+      const isFree = allowFree && (item.provider === 'Free' || item.id.startsWith('free/'))
       const isJev = !isFree && (item.provider === 'Jev Group' || isDecisionCatalogModelId(item.id))
-      const storedProvider = isFree ? 'Free' : isJev ? 'Jev Group' : item.provider
+      const storedProvider = isFree
+        ? 'Free'
+        : isJev
+          ? 'Jev Group'
+          : item.provider !== 'Free'
+            ? item.provider
+            : (familyFromUpstreamId(item.id) ?? 'GPT')
       const inputMicros = isFree ? 0 : Math.round((item.inputPrice || 0.1) * 1_000_000)
       const outputMicros = isFree
         ? 0
@@ -972,6 +997,12 @@ export async function importApinexCatalogModels(): Promise<{
             !isFree && existing.output_price_micros === 0 ? outputMicros : existing.output_price_micros,
             isFree ? tokenWeight : 0,
             item.id,
+            item.id,
+          )
+          db.prepare(`UPDATE pricing_rules SET input_multiplier = ?, output_multiplier = ?, updated_at = ? WHERE model_id = ?`).run(
+            tokenWeight > 0 ? tokenWeight : 1,
+            tokenWeight > 0 ? tokenWeight : 1,
+            createdAt,
             item.id,
           )
           updated += 1

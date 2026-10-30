@@ -1,4 +1,4 @@
-import { db, id, nowIso } from './db.js'
+import { db, nowIso } from './db.js'
 import { claimPaymentSignatureOrThrow } from './paymentSignatures.js'
 import { activateSubscription, getSubscriptionPlan } from './subscriptions.js'
 import { applyOfferCents, getActiveSubscriptionOffer } from './subscriptionOffers.js'
@@ -72,17 +72,7 @@ export async function quoteSubscription(input: {
   userId?: string
   tokens?: number
 }) {
-  const { plan, amountCents, amountUsd } = resolvePlan(input.planKey, input.userId, input.tokens)
-
-  const base = {
-    planKey: plan.key,
-    planLabel: plan.label,
-    days: plan.days,
-    kind: plan.kind,
-    tokenLimit: plan.kind === 'unlimited' ? null : plan.tokenLimit,
-    amountCents,
-    amountUsd,
-  }
+  resolvePlan(input.planKey, input.userId, input.tokens)
 
   throw new Error('Crypto payments are currently disabled')
 }
@@ -179,13 +169,6 @@ export function creditSubscriptionPayment(
 function afterCredit(result: ReturnType<typeof creditSubscriptionPayment>) {
   if (result.already) return
 
-  const user = db
-    .prepare(`SELECT email, solana_wallet FROM users WHERE id = ?`)
-    .get(result.userId) as
-    | { email: string | null; solana_wallet: string | null }
-    | undefined
-
-  
   try {
     tryGrantReferralReward({
       userId: result.userId,

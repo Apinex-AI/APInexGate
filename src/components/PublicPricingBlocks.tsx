@@ -24,7 +24,7 @@ export type PublicModelPrice = {
   outputDollarsPer1M?: number
 }
 
-export function formatUsd(value: number) {
+function formatUsd(value: number) {
   if (!Number.isFinite(value)) return '—'
   if (value <= 0) return 'Free'
   if (value >= 1) return Number.isInteger(value) ? `$${value}` : `$${value.toFixed(2)}`

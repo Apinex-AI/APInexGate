@@ -1,10 +1,10 @@
 import { db, id, nowIso } from './db.js'
-import { hashPassword } from './auth.js'
+import { hashPassword, verifyPassword } from './auth.js'
 
 const adminEmail = 'admin@localhost'
-const adminPassword = (process.env.ADMIN_PASSWORD ?? '').trim()
 
 export function ensureAdminUser() {
+  const adminPassword = (process.env.ADMIN_PASSWORD ?? '').trim()
   if (!adminPassword) {
     console.warn('ADMIN_PASSWORD is not set; admin login is disabled until it is configured.')
     return
@@ -12,13 +12,22 @@ export function ensureAdminUser() {
   const timestamp = nowIso()
   const passwordHash = hashPassword(adminPassword)
 
-  const existing = db.prepare('SELECT id FROM admin_users WHERE email = ?').get(adminEmail) as { id: string } | undefined
+  const existing = db
+    .prepare('SELECT id, password_hash FROM admin_users WHERE email = ?')
+    .get(adminEmail) as { id: string; password_hash?: string } | undefined
   if (existing) {
-    db.prepare('UPDATE admin_users SET password_hash = ?, role = ? WHERE id = ?').run(
-      passwordHash,
-      'owner',
-      existing.id,
-    )
+    const passwordChanged = !existing.password_hash || !verifyPassword(adminPassword, existing.password_hash)
+    if (passwordChanged) {
+      db.prepare('UPDATE admin_users SET password_hash = ?, role = ? WHERE id = ?').run(
+        passwordHash,
+        'owner',
+        existing.id,
+      )
+      // D39: Immediately revoke all existing sessions if admin password was rotated
+      db.prepare('DELETE FROM sessions WHERE user_id = ?').run(existing.id)
+    } else {
+      db.prepare('UPDATE admin_users SET role = ? WHERE id = ?').run('owner', existing.id)
+    }
     return
   }
 

@@ -175,7 +175,7 @@ function markdownToHtml(raw: string) {
   let html = raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   html = html.replace(/```[a-z0-9]*\n?([\s\S]*?)```/gi, (_match, code: string) => {
     fences.push(`<pre><code>${code.replace(/\n$/, '')}</code></pre>`)
-    return `\u0000${fences.length - 1}\u0000`
+    return `@@FENCE_${fences.length - 1}@@`
   })
   html = html.replace(/`([^`\n]+)`/g, '<code>$1</code>')
   html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
@@ -189,7 +189,7 @@ function markdownToHtml(raw: string) {
     .split(/\n{2,}/)
     .map((part) => (part.startsWith('<h') || part.startsWith('<ul') || part.startsWith('<pre') ? part : `<p>${part.replace(/\n/g, '<br>')}</p>`))
     .join('')
-  return html.replace(/\u0000(\d+)\u0000/g, (_m, index: string) => fences[Number(index)] ?? '')
+  return html.replace(/@@FENCE_(\d+)@@/g, (_m, index: string) => fences[Number(index)] ?? '')
 }
 
 function ErrorText({ message }: { message: string }) {

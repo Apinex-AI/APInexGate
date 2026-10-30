@@ -128,21 +128,20 @@ function userIdentity(userId: string | null | undefined) {
   try {
     const row = db
       .prepare(
-        `SELECT display_id, email, solana_wallet
+        `SELECT display_id, email
          FROM users WHERE id = ?`,
       )
       .get(userId) as
       | {
           display_id: number | null
           email: string | null
-          solana_wallet: string | null
         }
       | undefined
     return {
       userId,
       displayId: row?.display_id ?? null,
       email: row?.email ?? null,
-      wallet: row?.solana_wallet ?? null,
+      wallet: null,
       domain: null,
     }
   } catch {

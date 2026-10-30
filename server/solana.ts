@@ -1,5 +1,5 @@
 import { db, nowIso } from './db.js'
-import { claimPaymentSignature, claimPaymentSignatureOrThrow, type PaymentFlow } from './paymentSignatures.js'
+import { claimPaymentSignatureOrThrow, type PaymentFlow } from './paymentSignatures.js'
 import { timingSafeCompare } from './crypto.js'
 
 const BASE58_REGEX = /^[1-9A-HJ-NP-Za-km-z]{87,88}$/

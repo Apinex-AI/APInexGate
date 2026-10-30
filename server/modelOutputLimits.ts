@@ -10,8 +10,17 @@ type UpstreamPath = 'chat/completions' | 'responses'
 
 function isLunaModel(modelIds: readonly string[]) {
   return modelIds.some((modelId) => {
-    const value = modelId.toLowerCase()
-    return value === 'gpt/5.6-luna' || value.endsWith('/gpt-5.6-luna')
+    const value = modelId.toLowerCase().trim()
+    return (
+      value === 'gpt/5.6-luna' ||
+      value === 'gpt-5.6-luna' ||
+      value.endsWith('/gpt-5.6-luna') ||
+      value === 'gpt-6-luna' ||
+      value === 'free/gpt-6-luna' ||
+      value.endsWith('/gpt-6-luna') ||
+      value === 'gpt-6-luna-decisions' ||
+      value.endsWith('/gpt-6-luna-decisions')
+    )
   })
 }
 

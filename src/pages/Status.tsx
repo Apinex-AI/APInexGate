@@ -4,8 +4,8 @@ import { ProviderIcon } from '../components/ProviderIcon'
 
 import './Status.css'
 
-type HourState = 'up' | 'load' | 'partial' | 'down' | 'none'
-type ModelState = 'operational' | 'degraded' | 'partial' | 'outage' | 'unknown'
+type HourState = 'up' | 'load' | 'partial' | 'down' | 'none' | 'no_data'
+type ModelState = 'operational' | 'degraded' | 'partial' | 'outage' | 'unknown' | 'no_data' | 'none'
 
 type StatusModel = {
   id: string
@@ -28,6 +28,8 @@ const STATE_LABEL: Record<ModelState, string> = {
   partial: 'Partial outage',
   outage: 'Outage',
   unknown: 'No recent traffic',
+  no_data: 'No data',
+  none: 'No data',
 }
 
 const HOUR_LABEL: Record<HourState, string> = {
@@ -35,7 +37,8 @@ const HOUR_LABEL: Record<HourState, string> = {
   load: 'high load',
   partial: 'partial outage',
   down: 'outage',
-  none: 'operational',
+  none: 'no data',
+  no_data: 'no data',
 }
 
 function formatHour(iso: string) {
@@ -186,13 +189,13 @@ export function StatusPage() {
                 <div
                   className="status-bars"
                   role="img"
-                  aria-label={`${model.name}: ${STATE_LABEL[model.state]}`}
+                  aria-label={`${model.name}: ${STATE_LABEL[model.state] ?? 'No data'}`}
                 >
                   {model.hours.map((hour) => (
                     <span
                       key={hour.at}
                       className={`status-bar is-${hour.state}`}
-                      title={`${formatHour(hour.at)} — ${HOUR_LABEL[hour.state]}`}
+                      title={`${formatHour(hour.at)} — ${HOUR_LABEL[hour.state] ?? 'no data'}`}
                     />
                   ))}
                 </div>
@@ -205,7 +208,7 @@ export function StatusPage() {
               <div className="status-row-meta">
                 <span className={`status-state-pill is-${model.state}`}>
                   <span className="state-indicator-dot" />
-                  {STATE_LABEL[model.state]}
+                  {STATE_LABEL[model.state] ?? 'No data'}
                 </span>
                 <div className="status-uptime-stat">
                   <strong>{uptimeLabel(model.uptimePct)}</strong>

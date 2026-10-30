@@ -102,7 +102,7 @@ export const userApi = {
     request<{ ok: boolean }>(`/api/user/keys/${id}/revoke`, { method: 'POST' }),
 
   models: () =>
-    request<{ models: CustomerModel[]; anthropicBonusNotice?: boolean }>('/api/user/models'),
+    request<{ models: CustomerModel[] }>('/api/user/models'),
   stats: () => request<CustomerStats>('/api/user/stats'),
   usage: (query?: { keyId?: string; status?: string; limit?: number; offset?: number }) => {
     const params = new URLSearchParams()

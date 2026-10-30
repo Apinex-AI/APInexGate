@@ -199,7 +199,7 @@ function ChatBody({ model, onCopy }: { model: ChatModel; onCopy: (text: string) 
     return () => {
       cancelled = true
     }
-  }, [model.catalogId, model.id, model.name])
+  }, [model])
 
   function getCodeText() {
     if (lang === 'python') return pythonSnippet(model.id, apiKey, isDecision)

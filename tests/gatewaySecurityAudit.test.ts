@@ -11,8 +11,6 @@ process.env.DB_PATH = dbPath
 const { db } = await import('../server/db.ts')
 const {
   tryReserveTokens,
-  settleReservation,
-  releaseReservation,
   settleTokens,
   releaseTokens,
 } = await import('../server/tokenReservations.ts')

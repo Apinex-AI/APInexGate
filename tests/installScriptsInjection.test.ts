@@ -47,7 +47,7 @@ test('install scripts are resistant to OS command injection via model catalog an
           },
           stdio: 'pipe',
         })
-      } catch (_err: unknown) {
+      } catch {
         // Some tools might fail at downstream steps, but should NOT execute either marker
       }
 
@@ -68,4 +68,20 @@ test('install scripts are resistant to OS command injection via model catalog an
       fs.unlinkSync(keyMarker)
     }
   }
+})
+
+test('D32: Kimi installer interpolates SLUG and uses gpt-6.1-sol', () => {
+  const unixScript = buildInstallScript('kimi', 'linux')
+  const winScript = buildInstallScript('kimi', 'windows')
+
+  // Must not contain literal string '${SLUG()}' anywhere
+  assert.equal(unixScript.includes('${SLUG()}'), false, 'Unix script contains literal ${SLUG()}')
+  assert.equal(winScript.includes('${SLUG()}'), false, 'Windows script contains literal ${SLUG()}')
+
+  // Must contain gpt-6.1-sol and not gpt-6-sol
+  assert.match(unixScript, /gpt-6\.1-sol/)
+  assert.equal(unixScript.includes('gpt-6-sol'), false, 'Unix script still contains gpt-6-sol')
+
+  assert.match(winScript, /gpt-6\.1-sol/)
+  assert.equal(winScript.includes('gpt-6-sol'), false, 'Windows script still contains gpt-6-sol')
 })

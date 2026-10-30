@@ -385,10 +385,9 @@ export function AdminModels() {
                         <div className="admin-model-price">
                           <div className="admin-model-price-text">
                             <strong className={`mono${model.provider === 'Free' ? ' admin-model-price-free' : ''}`}>
-                              {model.provider === 'Free' ? 'FREE' : formatSplitPrice(model)}
+                              {model.provider === 'Free' ? `${model.token_weight ?? 1}x FREE` : formatSplitPrice(model)}
                             </strong>
                           </div>
-                          {model.provider === 'Free' ? null : (
                           <button
                             className="btn btn-ghost btn-sm admin-price-edit-btn"
                             type="button"
@@ -396,16 +395,19 @@ export function AdminModels() {
                             disabled={busy}
                             onClick={() => {
                               setPriceTarget(model)
-                              const input = Math.max(0, Number(model.input_price_micros) || 0) / 1_000_000
-                              const outputRaw = Math.max(0, Number(model.output_price_micros) || 0) / 1_000_000
-                              const isJev = model.provider === 'Jev Group' || /jev|drex|subq|decision/i.test(model.id)
-                              setPriceInput(priceDraft(input))
-                              setPriceOutput(priceDraft(outputRaw > 0 ? outputRaw : isJev ? 0 : input))
+                              if (model.provider === 'Free') {
+                                setPriceWeight(String(model.token_weight ?? 1))
+                              } else {
+                                const input = Math.max(0, Number(model.input_price_micros) || 0) / 1_000_000
+                                const outputRaw = Math.max(0, Number(model.output_price_micros) || 0) / 1_000_000
+                                const isJev = model.provider === 'Jev Group' || /jev|drex|subq|decision/i.test(model.id)
+                                setPriceInput(priceDraft(input))
+                                setPriceOutput(priceDraft(outputRaw > 0 ? outputRaw : isJev ? 0 : input))
+                              }
                             }}
                           >
                             <IconPencil size={14} />
                           </button>
-                          )}
                         </div>
                       </td>
                       <td>
@@ -603,17 +605,35 @@ export function AdminModels() {
             />
           </div>
           {selected || editTarget ? (
-            <div className="field">
-              <label htmlFor="model-context-window">Context window</label>
-              <input
-                id="model-context-window"
-                className="input"
-                value={contextWindow}
-                onChange={(event) => setContextWindow(event.target.value)}
-                placeholder="1M, 128K, 200K…"
-              />
-              <span className="field-hint">Display context limit shown in UI and docs (e.g. 1M, 128K, 200K).</span>
-            </div>
+            <>
+              <div className="field">
+                <label htmlFor="model-context-window">Context window</label>
+                <input
+                  id="model-context-window"
+                  className="input"
+                  value={contextWindow}
+                  onChange={(event) => setContextWindow(event.target.value)}
+                  placeholder="1M, 128K, 200K…"
+                />
+                <span className="field-hint">Display context limit shown in UI and docs (e.g. 1M, 128K, 200K).</span>
+              </div>
+              {category === 'Free' || apiId.trim().startsWith('free/') ? (
+                <div className="field">
+                  <label htmlFor="model-token-weight">Multiplier (Token Weight)</label>
+                  <input
+                    id="model-token-weight"
+                    className="input"
+                    type="number"
+                    min="0.1"
+                    step="0.5"
+                    value={priceWeight}
+                    onChange={(event) => setPriceWeight(event.target.value)}
+                    placeholder="1"
+                  />
+                  <span className="field-hint">Multiplier deducted from the daily free token allowance (e.g. 1x, 2x, 3x).</span>
+                </div>
+              ) : null}
+            </>
           ) : null}
           </> : null}
         </div>
@@ -637,8 +657,12 @@ export function AdminModels() {
       <Modal
         open={!!priceTarget}
         onClose={() => setPriceTarget(null)}
-        title={priceTarget ? `Price · ${priceTarget.name}` : 'Price'}
-        description="Set retail input and output prices per 1M tokens in USD. Input and output are billed separately. Free models draw the free-token allowance at x1."
+        title={priceTarget ? `${priceTarget.provider === 'Free' ? 'Multiplier' : 'Price'} · ${priceTarget.name}` : 'Price'}
+        description={
+          priceTarget?.provider === 'Free'
+            ? 'Set the token allowance multiplier for this Free model (e.g. 1x, 2x, 3x). Deducted from daily free allowance.'
+            : 'Set retail input and output prices per 1M tokens in USD. Input and output are billed separately.'
+        }
         footer={
           <>
             <button className="btn btn-secondary" type="button" onClick={() => setPriceTarget(null)}>
@@ -650,6 +674,15 @@ export function AdminModels() {
               disabled={busy || !priceTarget}
               onClick={() => {
                 if (!priceTarget) return
+                if (priceTarget.provider === 'Free') {
+                  const weight = Number(priceWeight)
+                  if (!Number.isFinite(weight) || weight <= 0) return
+                  void run(async () => {
+                    await adminApi.updatePricing(priceTarget.id, { tokenWeight: weight })
+                    setPriceTarget(null)
+                  }, 'Multiplier saved')
+                  return
+                }
                 const input = Number(priceInput)
                 const output = Number(priceOutput)
                 const isJev = priceTarget.provider === 'Jev Group' || /jev|drex|subq|decision/i.test(priceTarget.id)
@@ -663,12 +696,29 @@ export function AdminModels() {
                 }, 'Price saved')
               }}
             >
-              Save price
+              {priceTarget?.provider === 'Free' ? 'Save multiplier' : 'Save price'}
             </button>
           </>
         }
       >
         <div className="form-stack">
+          {priceTarget?.provider === 'Free' ? (
+            <div className="field">
+              <label htmlFor="model-token-weight-edit">Multiplier (Token Weight)</label>
+              <input
+                id="model-token-weight-edit"
+                className="input"
+                type="number"
+                min="0.1"
+                step="0.5"
+                value={priceWeight}
+                onChange={(event) => setPriceWeight(event.target.value)}
+                placeholder="1"
+              />
+              <span className="field-hint">Free allowance multiplier for {priceTarget.name}.</span>
+            </div>
+          ) : (
+            <>
               <div className="field">
                 <label htmlFor="model-input-price">Input ($ / 1M tokens)</label>
                 <input
@@ -692,6 +742,8 @@ export function AdminModels() {
               <span className="field-hint">
                 1M input + 1M output = ${((Number(priceInput) || 0) + (Number(priceOutput) || 0)).toFixed(2)}
               </span>
+            </>
+          )}
         </div>
       </Modal>
     </div>

@@ -17,10 +17,8 @@ import { acquireDispatchSlot, releaseDispatchSlot } from './dispatchQueue.js'
 import { chargeTokens, chargeUsdMicros, usdFromTokens } from '../shared/billing.js'
 import { applySettledPromoCost, discountedTokenCost, promoBillingPlan } from './promoEvents.js'
 import { playgroundSessionUser, stripPlaygroundTools } from './playgroundAuth.js'
-import { debitApiTokens, hasUserTopup, regularSpendableTokens } from './restrictedCredits.js'
+import { debitApiTokens } from './restrictedCredits.js'
 import {
-  anthropicBonusErrorMessage,
-  anthropicTopupRequiredErrorMessage,
   estimateModelReservationTokens,
   getOpenReservedTokensForKey,
   getOpenReservedTokensForUser,
@@ -66,7 +64,6 @@ const RETRY_STATUSES = new Set([408, 429, 500, 502, 503, 504])
 // abort work that was about to succeed and push the caller onto a paid fallback.
 const UPSTREAM_STREAM_TIMEOUT_MS = 30_000
 const UPSTREAM_STREAM_FIRST_CHUNK_TIMEOUT_MS = 30_000
-const UPSTREAM_REQUEST_TIMEOUT_MS = 30_000
 const UPSTREAM_NON_STREAM_TIMEOUT_MS = 180_000
 
 function upstreamTimeoutFor(payload: Record<string, unknown>, hasFallbacks = false, _provider?: GatewayUpstream) {
@@ -483,7 +480,7 @@ function recordUsage(input: {
   })
 
   if (input.reservationId) {
-    if (input.status === 'ok') {
+    if (input.status === 'ok' || (input.clientDisconnected && input.costTokens > 0)) {
       settleReservation(input.reservationId, Math.max(0, input.costTokens))
       // Hold already debited spendable balance; check after settle/refund.
       maybeNotifyUserLowBalance(input.userId)
@@ -494,7 +491,7 @@ function recordUsage(input: {
   }
 
   // Legacy path (no reservation) — keep clamp for safety.
-  if (input.status === 'ok' && input.costTokens > 0) {
+  if ((input.status === 'ok' || input.clientDisconnected) && input.costTokens > 0) {
     debitApiTokens(input.userId, input.costTokens)
     db.prepare(`UPDATE api_keys SET spent_tokens = spent_tokens + ? WHERE id = ?`).run(
       input.costTokens,
@@ -505,8 +502,8 @@ function recordUsage(input: {
 }
 
 /** True when the model is a zero-cost route metered against the free allowance. */
-function freeAllowanceWeight(_userId: string, _model: ModelRow) {
-  return 1
+function freeAllowanceWeight(_userId: string, model: ModelRow) {
+  return Number(model.token_weight) > 0 ? Number(model.token_weight) : 1
 }
 
 function isFreeMeteredModel(modelId: string) {
@@ -928,7 +925,7 @@ function sanitizeCallIds(payload: Record<string, unknown>) {
 
 export function applyUpstreamPayloadQuirks(
   payload: Record<string, unknown>,
-  provider: string,
+  _provider?: string,
 ) {
   // A flat Responses-style `response_format` is invalid on every chat.completions
   // endpoint, so repair it regardless of provider rather than per-upstream.
@@ -994,8 +991,7 @@ export function applyUpstreamPayloadQuirks(
             row.content = ''
           } else {
             // Keep only valid parts or flatten to string if contains non-standard parts
-            const validPartTypes = new Set(['text', 'image_url', 'video_url', 'audio_url', 'input_audio'])
-            const hasInvalidPart = row.content.some((part) => !part || typeof part !== 'object' || !validPartTypes.has(String((part as { type?: unknown }).type ?? '')))
+            const _validPartTypes = new Set(['text', 'image_url', 'video_url', 'audio_url', 'input_audio'])
           }
         } else if (row.content != null && typeof row.content === 'object') {
           // If content is an object instead of string or array
@@ -1865,19 +1861,8 @@ async function proxyModelRequest(input: {
     }
   }
 
-  const anthropicModel =
-    model.provider.trim().toLowerCase() === 'anthropic' ||
-    (model.id.toLowerCase().includes('claude') && !freeModel)
-
-  if (anthropicModel && !hasUserTopup(auth.user.id)) {
-        return sendError(402, anthropicTopupRequiredErrorMessage(), 'billing_error')
-  }
-
-  if (!freeModel && (auth.user.balance_tokens <= 0 || (anthropicModel && regularSpendableTokens(auth.user.id) <= 0))) {
-        const message = anthropicModel
-      ? anthropicBonusErrorMessage()
-      : 'Insufficient balance'
-    return sendError(402, message, 'billing_error')
+  if (!freeModel && auth.user.balance_tokens <= 0) {
+    return sendError(402, 'Insufficient balance', 'billing_error')
   }
   if (
     !freeModel &&
@@ -2014,7 +1999,7 @@ async function proxyModelRequest(input: {
         : reservationEstimate.costTokens,
     modelId: model.id,
     path: `/v1/${path}`,
-    allowRestrictedCredits: !anthropicModel,
+    allowRestrictedCredits: true,
     signal: clientAbortController.signal,
   })
   if (!reservation.ok) {
@@ -3200,15 +3185,6 @@ export function isClientDisconnect(
   return typeof code === 'string' && CLIENT_DISCONNECT_CODES.has(code)
 }
 
-function streamFailureDetail(reason: unknown) {
-  if (reason instanceof Error) {
-    const code = (reason as { code?: unknown }).code
-    const suffix = typeof code === 'string' && code ? ` (${code})` : ''
-    return `${reason.message}${suffix}`.slice(0, 200)
-  }
-  return 'unknown error'
-}
-
 async function pipeStreamingCompletion(input: {
   reply: FastifyReply
   upstream: Response
@@ -3268,6 +3244,7 @@ async function pipeStreamingCompletion(input: {
   let pending = ''
   let inputTokens = 0
   let outputTokens = 0
+  let streamedChars = 0
   let sawUsage = false
   let messageStarted = false
   let textStarted = false
@@ -3310,6 +3287,8 @@ async function pipeStreamingCompletion(input: {
     if (!choice) return
     const delta = (choice.delta && typeof choice.delta === 'object' ? choice.delta : {}) as Record<string, unknown>
     if (typeof delta.content === 'string' && delta.content) {
+      streamedChars += delta.content.length
+      if (!sawUsage) outputTokens = Math.max(outputTokens, charsToTokens(streamedChars))
       sendTextStart()
       writeAnthropicEvent('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: delta.content } })
     }
@@ -3327,7 +3306,11 @@ async function pipeStreamingCompletion(input: {
           writeAnthropicEvent('content_block_start', { type: 'content_block_start', index: block.contentIndex, content_block: { type: 'tool_use', id: block.id, name: block.name, input: {} } })
         }
         const args = typeof fn.arguments === 'string' ? fn.arguments : ''
-        if (args) writeAnthropicEvent('content_block_delta', { type: 'content_block_delta', index: block.contentIndex, delta: { type: 'input_json_delta', partial_json: args } })
+        if (args) {
+          streamedChars += args.length
+          if (!sawUsage) outputTokens = Math.max(outputTokens, charsToTokens(streamedChars))
+          writeAnthropicEvent('content_block_delta', { type: 'content_block_delta', index: block.contentIndex, delta: { type: 'input_json_delta', partial_json: args } })
+        }
       }
     }
     if (choice.finish_reason != null) finishReason = choice.finish_reason
@@ -3357,6 +3340,26 @@ async function pipeStreamingCompletion(input: {
       if (responseStyle === 'anthropic') {
         processOpenAiChunk(chunk)
         return ''
+      }
+      if (chunk.choices && Array.isArray(chunk.choices)) {
+        for (const choice of chunk.choices as Array<Record<string, unknown>>) {
+          const delta = choice.delta as Record<string, unknown> | undefined
+          if (delta) {
+            if (typeof delta.content === 'string') streamedChars += delta.content.length
+            if (typeof delta.reasoning_content === 'string') streamedChars += delta.reasoning_content.length
+            if (typeof delta.reasoning === 'string') streamedChars += delta.reasoning.length
+            if (Array.isArray(delta.tool_calls)) {
+              for (const call of delta.tool_calls) {
+                const fn = (call as Record<string, unknown>)?.function as Record<string, unknown> | undefined
+                if (typeof fn?.arguments === 'string') streamedChars += fn.arguments.length
+                if (typeof fn?.name === 'string') streamedChars += fn.name.length
+              }
+            }
+          }
+        }
+        if (!sawUsage) {
+          outputTokens = Math.max(outputTokens, charsToTokens(streamedChars))
+        }
       }
       if (responsesEncoder) {
         // Track usage from the chat stream so billing matches a native reply.
@@ -3519,10 +3522,38 @@ async function pipeStreamingCompletion(input: {
     const clientGone = isClientDisconnect(reason, reply.raw)
     try { reply.raw.end() } catch { /* ignore */ }
     try { void reader.cancel().catch(() => {}) } catch { /* ignore */ }
-    recordUsage({ userId: auth.user.id, apiKeyId: auth.key.id, modelId: model.id, provider: model.provider, inputTokens: 0, outputTokens: 0, costTokens: 0, latencyMs: Date.now() - started, status: 'error', clientDisconnected: clientGone, reservationId })
-    // A cancelled request is normal IDE behaviour, not an incident.
-    if (!clientGone) {
+    if (clientGone) {
+      const actualOutput = sawUsage && outputTokens > 0
+        ? outputTokens
+        : (outputTokens || (streamedChars > 0 ? charsToTokens(streamedChars) : 0))
+      const actualInput = sawUsage && inputTokens > 0
+        ? inputTokens
+        : (inputTokens || estimateUsage(body).inputTokens)
+      const billed = resolveBillableUsage({
+        body,
+        parsed: { inputTokens: actualInput, outputTokens: actualOutput },
+        rates: streamRates,
+        freeModel: model.provider.trim().toLowerCase() === 'free',
+      })
+      const free = model.provider.trim().toLowerCase() === 'free'
+      recordUsage({
+        userId: auth.user.id,
+        apiKeyId: auth.key.id,
+        modelId: model.id,
+        provider: model.provider,
+        inputTokens: billed.inputTokens,
+        outputTokens: billed.outputTokens,
+        costTokens: billed.costTokens,
+        allowanceWeight: free ? freeAllowanceWeight(auth.user.id, model) : 0,
+        latencyMs: Date.now() - started,
+        status: 'ok',
+        clientDisconnected: true,
+        reservationId,
+      })
+      return
     }
+    recordUsage({ userId: auth.user.id, apiKeyId: auth.key.id, modelId: model.id, provider: model.provider, inputTokens: 0, outputTokens: 0, costTokens: 0, latencyMs: Date.now() - started, status: 'error', clientDisconnected: false, reservationId })
+    // A cancelled request is normal IDE behaviour, not an incident.
     return
   } finally {
     reply.raw.off('close', onStreamDisconnect)
@@ -3531,7 +3562,32 @@ async function pipeStreamingCompletion(input: {
     }
   }
 
-  const billed = resolveBillableUsage({ body, parsed: sawUsage ? { inputTokens, outputTokens } : { inputTokens: 0, outputTokens: 0 }, rates: streamRates, freeModel: model.provider.trim().toLowerCase() === 'free' })
+  const clientGone = isClientDisconnect(null, reply.raw)
+  const finalOutput = sawUsage && outputTokens > 0
+    ? outputTokens
+    : (outputTokens || (streamedChars > 0 ? charsToTokens(streamedChars) : 0))
+  const finalInput = sawUsage && inputTokens > 0
+    ? inputTokens
+    : (inputTokens || 0)
+  const billed = resolveBillableUsage({
+    body,
+    parsed: { inputTokens: finalInput, outputTokens: finalOutput },
+    rates: streamRates,
+    freeModel: model.provider.trim().toLowerCase() === 'free',
+  })
   const free = model.provider.trim().toLowerCase() === 'free'
-  recordUsage({ userId: auth.user.id, apiKeyId: auth.key.id, modelId: model.id, provider: model.provider, inputTokens: billed.inputTokens, outputTokens: billed.outputTokens, costTokens: billed.costTokens, allowanceWeight: free ? freeAllowanceWeight(auth.user.id, model) : 0, latencyMs: Date.now() - started, status: 'ok', reservationId })
+  recordUsage({
+    userId: auth.user.id,
+    apiKeyId: auth.key.id,
+    modelId: model.id,
+    provider: model.provider,
+    inputTokens: billed.inputTokens,
+    outputTokens: billed.outputTokens,
+    costTokens: billed.costTokens,
+    allowanceWeight: free ? freeAllowanceWeight(auth.user.id, model) : 0,
+    latencyMs: Date.now() - started,
+    status: 'ok',
+    clientDisconnected: clientGone,
+    reservationId,
+  })
 }

@@ -1,6 +1,6 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
-import { db, nowIso, id } from './db.js'
-import { claimPaymentSignature, claimPaymentSignatureOrThrow, PaymentSignatureConflictError, type PaymentFlow } from './paymentSignatures.js'
+import { db, nowIso } from './db.js'
+import { claimPaymentSignatureOrThrow, type PaymentFlow } from './paymentSignatures.js'
 
 /**
  * Constant-time comparison for strings or Buffers to prevent timing attacks.

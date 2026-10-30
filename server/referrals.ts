@@ -1,6 +1,5 @@
 import { randomBytes } from 'node:crypto'
 import { db, getSetting, id, nowIso, setSetting, tableExists } from './db.js'
-import { onUserBalanceCredited } from './userBalanceAlerts.js'
 import { TOKENS_PER_USD, formatUsdExact, tokensFromUsdCents } from '../shared/billing.js'
 
 const DEFAULT_MIN_PURCHASE_CENTS = 500
@@ -190,7 +189,6 @@ export function applyReferralCode(userId: string, rawCode: string | null | undef
   // If the user already made a qualifying purchase, try to settle the one-time bonus now.
   let granted: ReturnType<typeof tryGrantReferralReward> = { granted: false }
   try {
-    const settings = getReferralSettings()
     const parts: string[] = []
     const params: unknown[] = []
     if (tableExists('crypto_payments')) {
@@ -422,8 +420,6 @@ export function tryGrantReferralReward(input: {
 
   const result = tx()
   if (result) {
-    if (result.referrerCents > 0) onUserBalanceCredited(result.referrerId)
-    if (result.refereeCents > 0) onUserBalanceCredited(result.refereeId)
     return {
       granted: true,
       referrerUsd: result.referrerCents / 100,

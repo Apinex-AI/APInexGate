@@ -148,7 +148,7 @@ export function getCustomerSessionUser(request: FastifyRequest) {
     .prepare(`
       SELECT s.id, s.expires_at,
              u.id AS user_id, u.email, u.name, u.plan, u.status, u.balance_tokens,
-             u.solana_wallet, u.auth_method, u.password_hash, u.google_sub
+             u.auth_method, u.password_hash, u.google_sub
       FROM user_sessions s
       JOIN users u ON u.id = s.user_id
       WHERE s.id = ?
@@ -163,7 +163,6 @@ export function getCustomerSessionUser(request: FastifyRequest) {
         plan: string
         status: string
         balance_tokens: number
-        solana_wallet: string | null
         auth_method: string | null
         password_hash: string | null
         google_sub: string | null
@@ -191,7 +190,6 @@ export function getCustomerSessionUser(request: FastifyRequest) {
     status: session.status,
     balanceTokens: session.balance_tokens,
     expiresAt: session.expires_at,
-    solanaWallet: session.solana_wallet,
     authMethod: session.auth_method,
     passwordHash: session.password_hash,
     googleSub: session.google_sub,

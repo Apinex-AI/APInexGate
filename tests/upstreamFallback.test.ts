@@ -4,7 +4,6 @@ import {
   applyUpstreamPayloadQuirks,
   isProviderVariantRetryableError,
   MODEL_UPSTREAM_FALLBACKS,
-  stripUnsupportedGeminiSchemaMeta,
   upstreamFailureMessage,
   upstreamFallbacksFor,
 } from '../server/gateway.ts'

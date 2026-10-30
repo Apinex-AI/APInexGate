@@ -30,8 +30,10 @@ export function isValidModelId(id: unknown): id is string {
  * - \x00-\x1F, \x7F-\x9F (ASCII & Latin-1 control characters, null byte, newlines \r \n)
  * - \u2028, \u2029 (Unicode line & paragraph separators)
  */
-export const FORBIDDEN_NAME_CHARS_REGEX = /[\$`;&|<>\\"\x00-\x1F\x7F-\x9F\u2028\u2029]/
-export const FORBIDDEN_NAME_CHARS_GLOBAL_REGEX = /[\$`;&|<>\\"\x00-\x1F\x7F-\x9F\u2028\u2029]/g
+// eslint-disable-next-line no-control-regex
+export const FORBIDDEN_NAME_CHARS_REGEX = /[$`;&|<>\\"\x00-\x1F\x7F-\x9F\u2028\u2029]/
+// eslint-disable-next-line no-control-regex
+export const FORBIDDEN_NAME_CHARS_GLOBAL_REGEX = /[$`;&|<>\\"\x00-\x1F\x7F-\x9F\u2028\u2029]/g
 
 /**
  * Validates a model name.

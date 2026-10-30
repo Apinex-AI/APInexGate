@@ -141,7 +141,7 @@ async function sendReport(config: (typeof REPORTS)[number], now: Date) {
   const byProduct = new Map<Product, RevenueRow[]>()
   for (const row of rows) byProduct.set(row.product, [...(byProduct.get(row.product) ?? []), row])
 
-  const lines = [...byProduct.entries()].map(([product, productRows]) => {
+  const _lines = [...byProduct.entries()].map(([product, productRows]) => {
     const amounts = productRows.map((row) =>
       row.asset === 'CRYPTO' || row.asset === 'CARD' || row.asset === 'USD' ? formatUsd(row.amount) : `${formatAmount(row.amount)} ${row.asset}`,
     )
@@ -191,7 +191,7 @@ export async function generateAndSendRevenueReport(
   const byProduct = new Map<Product, RevenueRow[]>()
   for (const row of rows) byProduct.set(row.product, [...(byProduct.get(row.product) ?? []), row])
 
-  const lines = [...byProduct.entries()].map(([product, productRows]) => {
+  const _lines = [...byProduct.entries()].map(([product, productRows]) => {
     const amounts = productRows.map((row) =>
       row.asset === 'CRYPTO' || row.asset === 'CARD' || row.asset === 'USD' ? formatUsd(row.amount) : `${formatAmount(row.amount)} ${row.asset}`,
     )

@@ -7,7 +7,7 @@ import { registerSecurityHeaders } from './securityHeaders.js'
 import { startReservationExpiryJob } from './tokenReservations.js'
 import { startOpsMonitor } from './opsMonitor.js'
 import { startModelStatusPoller } from './modelStatusPoller.js'
-import { startRevenueReportJob } from './revenueReports.js'
+
 import { startProviderBalanceSyncJob } from './providerKeys.js'
 import { startPaymentInvoiceExpiryJob } from './paymentExpiry.js'
 import './seed.js'
@@ -246,7 +246,7 @@ startReservationExpiryJob()
 startOpsMonitor()
 startModelStatusPoller()
 startProviderBalanceSyncJob()
-startRevenueReportJob()
+
 startPaymentInvoiceExpiryJob()
 
 try {

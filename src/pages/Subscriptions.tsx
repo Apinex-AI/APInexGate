@@ -62,7 +62,10 @@ export function Subscriptions() {
 
   const plans = data?.plans ?? []
   const access = data?.access ?? null
-  const plan = useMemo(() => plans.find((item) => item.key === selected) ?? plans[0] ?? null, [plans, selected])
+  const plan = useMemo(() => {
+    const list = data?.plans ?? []
+    return list.find((item) => item.key === selected) ?? list[0] ?? null
+  }, [data?.plans, selected])
   const subscribed = access?.mode === 'subscription'
   const offerActive = Boolean(data?.offer && Date.parse(data.offer.expiresAt) > now)
 

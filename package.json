@@ -5,13 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:server": "tsx watch server/index.ts",
+    "dev:server": "tsx server/index.ts",
     "dev:full": "concurrently -k \"npm:dev:server\" \"npm:dev\"",
     "tunnel": "ngrok http 8787",
     "seed": "tsx server/seed.ts",
 
     "build": "tsc -b && tsc -p tsconfig.server.build.json && vite build",
-    "start": "tsx server/index.ts",
+    "start": "node dist-server/index.js",
     "lint": "oxlint",
     "test": "tsx --test tests/**/*.test.ts",
     "test:unit": "tsx --test tests/**/*.test.ts",

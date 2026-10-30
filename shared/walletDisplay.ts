@@ -17,7 +17,7 @@ export function shortenWalletName(address: string) {
   return maskWalletAddress(address, 4, 4)
 }
 
-/** Detect wallet-backed accounts stored with the address as email or solana_wallet set. */
+/** Detect wallet-backed accounts stored with the address as email. */
 export function isWalletAccountEmail(email: string | null | undefined) {
   return isSolanaAddress(email)
 }

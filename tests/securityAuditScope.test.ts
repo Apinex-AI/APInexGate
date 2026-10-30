@@ -15,7 +15,7 @@ const { db } = await import('../server/db.ts')
 const { debitWalletForPurchase, creditWalletBalance, debitWalletBalance, InsufficientBalanceError } = await import('../server/wallet.ts')
 const { createPromoCode, redeemPromoCode, generatePromoCodeLocal } = await import('../server/promo.ts')
 const { timingSafeCompare, verifyCallbackSignature, validatePaymentAmount, validateCentsAmount, processCryptoPayment } = await import('../server/crypto.ts')
-const { isValidSolanaSignature, validateSolanaAmount, validateSolanaLamports, verifySolanaTransactionSignature, compareSolanaAddresses, processSolanaPayment } = await import('../server/solana.ts')
+const { isValidSolanaSignature, validateSolanaAmount, validateSolanaLamports, processSolanaPayment } = await import('../server/solana.ts')
 const { PaymentSignatureConflictError } = await import('../server/paymentSignatures.ts')
 
 function seedUser(userId: string, email: string, balanceTokens = 0) {

@@ -322,8 +322,8 @@ export function upgradeUserRpm(
     orderId?: string
   },
 ) {
-  const user = db.prepare(`SELECT id, email, solana_wallet FROM users WHERE id = ?`).get(userId) as
-    | { id: string; email: string | null; solana_wallet: string | null }
+  const user = db.prepare(`SELECT id, email FROM users WHERE id = ?`).get(userId) as
+    | { id: string; email: string | null }
     | undefined
   if (!user) throw new Error(`User not found: ${userId}`)
 

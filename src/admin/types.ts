@@ -205,7 +205,6 @@ export type AdminUserRecord = {
   created_at: string
   last_seen_at: string | null
   telegram_username: string | null
-  solana_wallet?: string | null
   auth_method?: string | null
   promo_codes?: string[]
 }

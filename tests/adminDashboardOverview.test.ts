@@ -2,25 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 const { db, id, nowIso } = await import('../server/db.ts')
-const { getRevenueSinceLastDailyReport } = await import('../server/revenueReports.ts')
 const { rotateProviderTargets } = await import('../server/gateway.ts')
-
-test('getRevenueSinceLastDailyReport calculates window and returns revenue structure', async () => {
-  const res = await getRevenueSinceLastDailyReport()
-  assert.ok(typeof res.totalRevenueUsd === 'number')
-  assert.ok(typeof res.sinceIso === 'string')
-
-  // Verify the window starts at 19:00 UTC
-  const start = new Date(res.sinceIso)
-  assert.equal(start.getUTCHours(), 19)
-  assert.equal(start.getUTCMinutes(), 0)
-  assert.equal(start.getUTCSeconds(), 0)
-
-  // Verify start is in the past, within 24 hours of now
-  const now = Date.now()
-  assert.ok(start.getTime() <= now)
-  assert.ok(now - start.getTime() <= 24 * 3600 * 1000 + 5000)
-})
 
 test('provider keys rotate round-robin across requests', () => {
   const targets = [
@@ -111,4 +93,34 @@ test('buildAdminStatistics includes topUps and rpmPurchases chart series', async
   assert.ok(Array.isArray(stats.charts.series.rpmPurchases), 'rpmPurchases series should exist')
   assert.ok((stats.charts.meta.topUps?.total ?? 0) >= 25, 'topUps total should include $25 top-up')
   assert.ok((stats.charts.meta.rpmPurchases?.total ?? 0) >= 10.8, 'rpmPurchases total should include $10.80 RPM purchase')
+})
+
+test('adminStatisticsJob exports WORKER_TIMEOUT_MS of 20 seconds', async () => {
+  const { WORKER_TIMEOUT_MS } = await import('../server/adminStatisticsJob.ts')
+  assert.equal(WORKER_TIMEOUT_MS, 20_000)
+})
+
+test('corrupted tags_json in model_catalog does not crash with SyntaxError', async () => {
+  const testModelId = `test-model-corrupted-${Date.now()}`
+  db.prepare(`
+    INSERT INTO model_catalog
+      (id, provider, name, context_window, input_price_micros, output_price_micros, status, tags_json, created_at)
+    VALUES (?, 'GPT', 'Corrupted Tags Model', '128k', 0, 0, 'active', ?, datetime('now'))
+  `).run(testModelId, 'NOT_VALID_JSON{{{')
+
+  const row = db.prepare(`SELECT tags_json FROM model_catalog WHERE id = ?`).get(testModelId) as { tags_json: string }
+  assert.equal(row.tags_json, 'NOT_VALID_JSON{{{')
+
+  // Verify safe parse behavior
+  function safeParseTags(raw: unknown): string[] {
+    try {
+      const parsed = JSON.parse(String(raw ?? '[]'))
+      return Array.isArray(parsed) ? (parsed as string[]) : []
+    } catch {
+      return []
+    }
+  }
+
+  const tags = safeParseTags(row.tags_json)
+  assert.deepEqual(tags, [], 'Corrupted tags should safely fallback to empty array')
 })

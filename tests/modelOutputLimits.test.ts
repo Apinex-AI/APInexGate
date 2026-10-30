@@ -57,6 +57,18 @@ test('paid Luna also uses its native output budget while other models retain cal
   assert.deepEqual(other, { max_output_tokens: 1 })
 })
 
+test('recognizes gpt-6-luna, free/gpt-6-luna, and gpt-6-luna-decisions as Luna models', () => {
+  for (const modelId of ['gpt-6-luna', 'free/gpt-6-luna', 'gpt-6-luna-decisions', 'cx/gpt-6-luna', 'upstream/gpt-6-luna-decisions']) {
+    const chatPayload = { max_tokens: 256 }
+    normalizeModelOutputLimits(chatPayload, [modelId], 'chat/completions')
+    assert.deepEqual(chatPayload, { max_tokens: 128_000 }, `Failed for ${modelId} on chat`)
+
+    const responsesPayload = { max_tokens: 256 }
+    normalizeModelOutputLimits(responsesPayload, [modelId], 'responses')
+    assert.deepEqual(responsesPayload, { max_output_tokens: 128_000 }, `Failed for ${modelId} on responses`)
+  }
+})
+
 test('GLM Flash reserves enough output for visible text after reasoning', () => {
   const payload = { max_tokens: 1, max_output_tokens: 2, max_completion_tokens: 128 }
 

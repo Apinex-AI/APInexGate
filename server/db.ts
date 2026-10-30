@@ -426,10 +426,6 @@ db.prepare(`UPDATE users SET status = 'active' WHERE status = 'trial'`).run()
   if (!cols.some((column) => column.name === 'balance_alert_mask')) {
     db.exec('ALTER TABLE users ADD COLUMN balance_alert_mask INTEGER NOT NULL DEFAULT 15')
   }
-  // Solana wallet address (optional).
-  if (!cols.some((column) => column.name === 'solana_wallet')) {
-    db.exec('ALTER TABLE users ADD COLUMN solana_wallet TEXT')
-  }
   if (!cols.some((column) => column.name === 'auth_method')) {
     db.exec("ALTER TABLE users ADD COLUMN auth_method TEXT NOT NULL DEFAULT 'email'")
   }
@@ -444,12 +440,12 @@ db.prepare(`UPDATE users SET status = 'active' WHERE status = 'trial'`).run()
 db.exec(`
   DROP INDEX IF EXISTS idx_users_telegram_id;
   DROP INDEX IF EXISTS idx_users_telegram_verified;
+  DROP INDEX IF EXISTS idx_users_solana_wallet;
   DROP TABLE IF EXISTS telegram_link_tokens;
   DROP TABLE IF EXISTS telegram_chats;
   DROP TABLE IF EXISTS telegram_broadcasts;
   DROP TABLE IF EXISTS admin_login_approvals;
 `)
-db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_solana_wallet ON users (solana_wallet) WHERE solana_wallet IS NOT NULL`)
 
 {
   const cols = db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>
@@ -838,35 +834,17 @@ try {
     DELETE FROM model_upstream_routes WHERE upstream_provider != 'apinex';
     UPDATE model_catalog SET upstream_provider = 'apinex' WHERE upstream_provider IS NOT NULL AND upstream_provider != 'apinex';
   `)
-} catch (err) {
+} catch {
 }
 
 // Initialize default primary upstreams and routes only when not already set.
 // User changes made via admin panel are preserved across restarts and deploys.
 if (getSetting('model_routes_initialized_v2') !== '1') {
-  const updateRoute = db.prepare(`
-    UPDATE model_catalog
-    SET upstream_provider = ?, upstream_id = ?
-    WHERE id = ? AND (upstream_provider IS NULL OR upstream_provider = 'apinex')
-  `)
-
-
   db.exec(`
     INSERT OR IGNORE INTO model_upstream_routes (model_id, position, upstream_provider, upstream_id)
     SELECT id, 1, COALESCE(upstream_provider, 'apinex'), COALESCE(upstream_id, id)
     FROM model_catalog;
   `)
-  const setRoutes = db.transaction((modelId: string, primary: [string, string], fallbacks: Array<[string, string]>) => {
-    const exists = db.prepare('SELECT 1 FROM model_catalog WHERE id = ?').get(modelId)
-    if (!exists) return
-    const upsert = db.prepare(`
-      INSERT INTO model_upstream_routes (model_id, position, upstream_provider, upstream_id)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(model_id, position) DO NOTHING
-    `)
-    upsert.run(modelId, 1, primary[0], primary[1])
-    fallbacks.forEach((route, index) => upsert.run(modelId, index + 2, route[0], route[1]))
-  })
   setSetting('model_routes_initialized_v2', '1')
 }
 

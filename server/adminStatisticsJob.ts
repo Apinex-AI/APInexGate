@@ -14,6 +14,7 @@ type JobResult = {
 
 const FRESH_MS = 60_000
 const STALE_MAX_MS = 10 * 60 * 1000
+export const WORKER_TIMEOUT_MS = 20_000
 
 type CacheEntry = {
   data: unknown
@@ -31,7 +32,12 @@ function workerUrl() {
   return new URL('./adminStatistics.worker.ts', import.meta.url)
 }
 
-function runWorker<K extends JobKind>(kind: K, input: unknown): Promise<JobResult[K]> {
+function runWorker<K extends JobKind>(
+  kind: K,
+  input: unknown,
+  timeoutMs = WORKER_TIMEOUT_MS,
+  onTimeout?: () => void,
+): Promise<JobResult[K]> {
   const url = workerUrl()
   const execArgv = url.pathname.endsWith('.ts') ? ['--import', 'tsx'] : []
   return new Promise((resolve, reject) => {
@@ -41,9 +47,19 @@ function runWorker<K extends JobKind>(kind: K, input: unknown): Promise<JobResul
       env: { ...process.env, DB_PATH: dbPath, STATS_WORKER: '1' },
     })
     let settled = false
+
+    const timer = setTimeout(() => {
+      onTimeout?.()
+      finish(new Error(`Statistics worker execution timed out after ${Math.round(timeoutMs / 1000)}s`))
+    }, timeoutMs)
+    if (typeof timer.unref === 'function') {
+      timer.unref()
+    }
+
     const finish = (error?: Error, data?: JobResult[K]) => {
       if (settled) return
       settled = true
+      clearTimeout(timer)
       void worker.terminate()
       if (error) reject(error)
       else resolve(data as JobResult[K])
@@ -64,7 +80,7 @@ function triggerBackgroundRefresh<K extends JobKind>(kind: K, input: unknown, ke
   const job = new Promise<JobResult[K]>((resolve, reject) => {
     statsChain = statsChain
       .catch(() => undefined)
-      .then(() => runWorker(kind, input))
+      .then(() => runWorker(kind, input, WORKER_TIMEOUT_MS, () => inflight.delete(key)))
       .then(resolve, reject)
   })
     .then((data) => {

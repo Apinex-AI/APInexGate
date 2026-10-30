@@ -1,7 +1,6 @@
 import { db, id, nowIso } from './db.js'
-import { formatUsdExact } from '../shared/billing.js'
 import { chargeTokens, isFreeWeight } from '../shared/billing.js'
-import { debitApiTokens, debitRegularTokens, hasUserTopup } from './restrictedCredits.js'
+import { debitApiTokens, debitRegularTokens } from './restrictedCredits.js'
 
 /** Default max output when client omits max_tokens / max_output_tokens. */
 const DEFAULT_MAX_OUTPUT_TOKENS = 4_096
@@ -112,18 +111,6 @@ export function getOpenReservedTokensForKey(apiKeyId: string): number {
   return Math.max(0, Number(row?.n ?? 0))
 }
 
-export function anthropicTopupRequiredErrorMessage() {
-  return 'Anthropic models (Claude) are only available to accounts with at least one balance top-up. Please top up your balance to use Claude models.'
-}
-
-/**
- * Single source of truth for the Anthropic restriction notice, so edits to the
- * bonus setting are reflected immediately.
- */
-export function anthropicBonusErrorMessage() {
-  return anthropicTopupRequiredErrorMessage()
-}
-
 /**
  * Atomically holds `amount` tokens: debits user balance immediately and tracks hold.
  * Also checks API key spend limit against spent + currently reserved + new amount.
@@ -194,21 +181,10 @@ export function tryReserveTokens(input: {
         status: 402 as const,
       }
     }
-    const allowRestrictedCredits = input.allowRestrictedCredits !== false
-    if (!allowRestrictedCredits && !hasUserTopup(input.userId)) {
+    if (user.balance_tokens < amount) {
       return {
         ok: false as const,
-        error: anthropicTopupRequiredErrorMessage(),
-        status: 402 as const,
-      }
-    }
-    const regularBalance = Math.max(0, user.balance_tokens - Math.max(0, user.restricted_tokens))
-    if (user.balance_tokens < amount || (!allowRestrictedCredits && regularBalance < amount)) {
-      return {
-        ok: false as const,
-        error: !allowRestrictedCredits
-          ? anthropicTopupRequiredErrorMessage()
-          : `Insufficient balance. This request requires up to ${amount.toLocaleString('en-US')} tokens reserved.`,
+        error: `Insufficient balance. This request requires up to ${amount.toLocaleString('en-US')} tokens reserved.`,
         status: 402 as const,
       }
     }
@@ -237,7 +213,7 @@ export function tryReserveTokens(input: {
       }
     }
 
-    const restrictedReserved = allowRestrictedCredits ? Math.min(amount, Math.max(0, user.restricted_tokens)) : 0
+    const restrictedReserved = Math.min(amount, Math.max(0, user.restricted_tokens))
     const debit = db
       .prepare(
         `UPDATE users
@@ -274,7 +250,7 @@ export function tryReserveTokens(input: {
       input.path ?? null,
       amount,
       restrictedReserved,
-      allowRestrictedCredits ? 1 : 0,
+      1,
       createdAt,
       createdAt,
       expiresAt,

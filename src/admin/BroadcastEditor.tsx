@@ -1,7 +1,6 @@
 import { memo, type ClipboardEvent, type KeyboardEvent, type RefObject } from 'react'
-import { serializeBroadcastDom } from './broadcastMarkup'
 
-export const BROADCAST_SHORTCUTS = [
+const BROADCAST_SHORTCUTS = [
   { keys: '⌘/Ctrl+B', label: 'bold', code: 'b', tag: 'b' },
   { keys: '⌘/Ctrl+I', label: 'italic', code: 'i', tag: 'i' },
   { keys: '⌘/Ctrl+U', label: 'underline', code: 'u', tag: 'u' },
@@ -128,8 +127,3 @@ export const BroadcastEditor = memo(function BroadcastEditor({
     />
   )
 })
-
-export function readBroadcastEditor(editorRef: RefObject<HTMLDivElement | null>) {
-  const root = editorRef.current
-  return root ? serializeBroadcastDom(root) : ''
-}

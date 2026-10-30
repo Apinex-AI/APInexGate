@@ -22,7 +22,7 @@ import { BLOCKED_EMAIL_MESSAGE, isEmailBlocked } from './blockedEmails.js'
 import { getSiteLinks, saveSiteLinks } from './siteLinks.js'
 import { brandSlug, publicBrand } from '../shared/brand.js'
 import { buildAdminStatisticsOffThread, buildModelUsageStatsOffThread } from './adminStatisticsJob.js'
-import { ackLevelCelebration, getAccountLevel, getLevelSettings, levelSourceRef, recordLevelSpend, saveLevelSettings } from './accountLevels.js'
+import { ackLevelCelebration, getAccountLevel, getLevelSettings, saveLevelSettings } from './accountLevels.js'
 import {
   createProviderKey,
   deleteProviderKey,
@@ -32,7 +32,6 @@ import {
   isDecisionCatalogModelId,
   listProviderKeys,
   MODEL_CATEGORIES,
-  pickProviderSecrets,
   providerBalanceTotals,
   providerForTokenWeight,
   publicProviderKey,
@@ -44,7 +43,6 @@ import { isValidModelId, isValidModelName } from '../shared/modelValidation.js'
 import { isUpstreamProvider } from '../shared/providers.js'
 import { ALLOWED_EMAIL_DOMAINS_HINT, isAllowedEmailDomain } from '../shared/allowedEmailDomains.js'
 import { isAdminConsoleHost, requestHostname } from '../shared/adminHosts.js'
-import { getRevenueSinceLastDailyReport } from './revenueReports.js'
 import {
   activateSubscription,
   getActiveSubscription,
@@ -54,28 +52,21 @@ import {
   getFreeTierAccess,
   getSubscriptionHistory,
   getSubscriptionSettings,
-  purchaseSubscriptionWithBalance,
   revokeActiveSubscription,
   updateSubscriptionSettings,
 } from './subscriptions.js'
 import { applyOfferCents, getActiveSubscriptionOffer } from './subscriptionOffers.js'
 import { applyCombinedSubscriptionBonus } from './promoBonus.js'
 import {
-  createSubscriptionCryptoPurchase,
-  creditSubscriptionCryptoOrder,
   getSubscriptionPaymentPublic,
   quoteSubscription,
-  submitSubscriptionPurchase,
   subscriptionPayMethods,
   subscriptionSolanaPayConfigured,
   verifyAndCreditSubscriptionPayment,
 } from './subscriptionPayments.js'
 import { isSubscriptionPlanKey, nextUtcResetIso } from '../shared/subscriptions.js'
-import { isPaidRpmKey } from '../shared/rpm.js'
 import {
   adminRpmUser,
-  createRpmCryptoPurchase,
-  creditRpmCryptoOrder,
   getRpmCatalog,
   getRpmPaymentPublic,
   publicRpmPlans,
@@ -84,16 +75,8 @@ import {
   userRpmState,
 } from './rpmPlans.js'
 import { logUserActivity } from './userActivityLog.js'
-import { getRestrictedTokens, regularSpendableTokens } from './restrictedCredits.js'
-import { InsufficientBalanceError } from './wallet.js'
 
-/** Balance purchases return 402 when the wallet cannot cover the price. */
-function purchaseErrorCode(reason: unknown) {
-  return reason instanceof InsufficientBalanceError ? 402 : 400
-}
 import {
-  formatFullTokenCount,
-  tokensFromUsd,
   tokensFromUsdCents,
   TOKENS_PER_USD,
   usdFromTokens,
@@ -111,11 +94,7 @@ function catalogPrices(row: { provider: string; id: string; input_price_micros: 
   const output = storedOutput > 0 ? storedOutput : isJev ? 0 : input
   return { dollarsPer1M: input, inputDollarsPer1M: input, outputDollarsPer1M: output }
 }
-import { getAdminPromoEvent, getPublicPromoEvent, grantPromoAccess, liveDiscountMap, noteQualifyingTopup, saveAdminPromoEvent } from './promoEvents.js'
-
-function getTelegramBonusSettings() {
-  return { enabled: false, bonusTokens: 0, bonusUsd: 0 }
-}
+import { getAdminPromoEvent, getPublicPromoEvent, grantPromoAccess, liveDiscountMap, saveAdminPromoEvent } from './promoEvents.js'
 
 import {
   isOpenPaymentStatus,
@@ -123,17 +102,11 @@ import {
   paymentStatusLabel,
 } from '../shared/paymentStatus.js'
 import {
-  clearUserLowBalanceNotice,
-  getUserLowBalanceSettings,
-  setUserLowBalanceSettings,
-} from './userBalanceAlerts.js'
-import {
   applyReferralCode,
   bindReferrerOnSignup,
   ensureUserReferralCode,
   getReferralSettings,
   setReferralSettings,
-  tryGrantReferralReward,
   userReferralStats,
 } from './referrals.js'
 import {
@@ -146,13 +119,10 @@ import {
   deletePromoCode,
   generatePromoCodeLocal,
   listPromoCodes,
-  normalizePromoCode,
   redeemPromoCode,
-  rowFromDb,
   updatePromoCode,
 } from './promo.js'
 import {
-  applyCombinedTopupBonus,
   getActivePromoBonus,
   getPromoBonusPct,
 } from './promoBonus.js'
@@ -168,8 +138,6 @@ import {
   isAllowedGoogleLoginEmail,
   siteBaseUrl,
   statesMatch,
-  verifyGoogleIdToken,
-  type GoogleProfile,
 } from './googleAuth.js'
 import { enforceRateLimit, rateLimitKey, RL } from './rateLimit.js'
 
@@ -227,9 +195,10 @@ function requireAdminHost(request: FastifyRequest, reply: FastifyReply) {
 }
 
 function devAdminAccessTokenUser(request: FastifyRequest) {
-  // A local-development convenience only: never accept this header on release.
+  // A local-development convenience only: never accept this header on production release.
+  if (process.env.NODE_ENV === 'production') return null
   const site = String(process.env.SITE_URL ?? '').toLowerCase()
-  if (!site.includes('dev.')) return null
+  if (!site.includes('localhost') && !site.includes('127.0.0.1') && !site.includes('dev.')) return null
   const expected = String(process.env.DEV_ADMIN_ACCESS_TOKEN ?? '').trim()
   const supplied = request.headers['x-admin-access-token']
   const token = typeof supplied === 'string' ? supplied.trim() : Array.isArray(supplied) ? String(supplied[0] ?? '').trim() : ''
@@ -252,19 +221,25 @@ function extractApiSecretFromRequest(request: FastifyRequest) {
 
 function resolveCustomerOrApiKeyUser(request: FastifyRequest) {
   const customer = getCustomerSessionUser(request)
-  if (customer) return customer.id
+  if (customer) {
+    if (customer.status !== 'active') return null
+    return customer.id
+  }
 
   const secret = extractApiSecretFromRequest(request)
   if (secret) {
     const row = db
-      .prepare(`SELECT user_id, status FROM api_keys WHERE secret_hash = ?`)
-      .get(hashApiKey(secret)) as { user_id: string; status: string } | undefined
-    if (row && row.status === 'active') return row.user_id
+      .prepare(`
+        SELECT k.user_id, k.status AS key_status, u.status AS user_status
+        FROM api_keys k
+        JOIN users u ON u.id = k.user_id
+        WHERE k.secret_hash = ?
+      `)
+      .get(hashApiKey(secret)) as { user_id: string; key_status: string; user_status: string } | undefined
+    if (row && row.key_status === 'active' && row.user_status === 'active') return row.user_id
   }
   return null
 }
-
-const ALLOWED_TOPUP_DOLLARS = [5, 10, 20, 50] as const
 
 function requireAuth(request: FastifyRequest, reply: FastifyReply) {
   if (!requireAdminHost(request, reply)) return null
@@ -286,8 +261,21 @@ function requireCustomer(request: FastifyRequest, reply: FastifyReply) {
   return user
 }
 
-function parseJson<T>(value: string): T {
-  return JSON.parse(value) as T
+function parseJson<T>(value: unknown, fallback: T = [] as unknown as T): T {
+  try {
+    return value ? (JSON.parse(String(value)) as T) : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function safeParseTags(raw: unknown): string[] {
+  try {
+    const parsed = JSON.parse(String(raw ?? '[]'))
+    return Array.isArray(parsed) ? (parsed as string[]) : []
+  } catch {
+    return []
+  }
 }
 
 function publicUser(user: {
@@ -372,17 +360,6 @@ function resolveAdminRecipient(
   }
   return { ok: true, userId: matches[0].id }
 }
-
-function parseGoogleOAuthState(state: string | undefined) {
-  if (!state) return { kind: 'login' as const }
-  if (state.startsWith('link.')) {
-    const parts = state.split('.')
-    const userId = parts[1] || ''
-    return { kind: 'link' as const, userId }
-  }
-  return { kind: 'login' as const }
-}
-
 
 export async function registerRoutes(app: FastifyInstance) {
   const retiredCustomerAuthPaths = new Set([
@@ -725,7 +702,7 @@ export async function registerRoutes(app: FastifyInstance) {
     // --- Normal Google login / register ---
     const existingBySub = db
       .prepare(
-        `SELECT id, email, name, plan, status, balance_tokens, google_sub, solana_wallet
+        `SELECT id, email, name, plan, status, balance_tokens, google_sub
          FROM users WHERE google_sub = ?`,
       )
       .get(profile.sub) as
@@ -737,13 +714,12 @@ export async function registerRoutes(app: FastifyInstance) {
           status: string
           balance_tokens: number
           google_sub: string | null
-          solana_wallet: string | null
         }
       | undefined
 
     const existingByEmail = db
       .prepare(
-        `SELECT id, email, name, plan, status, balance_tokens, google_sub, solana_wallet
+        `SELECT id, email, name, plan, status, balance_tokens, google_sub
          FROM users WHERE email = ?`,
       )
       .get(profile.email) as
@@ -755,7 +731,6 @@ export async function registerRoutes(app: FastifyInstance) {
           status: string
           balance_tokens: number
           google_sub: string | null
-          solana_wallet: string | null
         }
       | undefined
 
@@ -827,7 +802,6 @@ export async function registerRoutes(app: FastifyInstance) {
         status: 'active',
         balance_tokens: 0,
         google_sub: profile.sub,
-        solana_wallet: null,
       }
     }
 
@@ -929,33 +903,12 @@ export async function registerRoutes(app: FastifyInstance) {
     }
   })
 
-  app.get('/api/user/alerts/low-balance', async (request, reply) => {
-    const user = requireCustomer(request, reply)
-    if (!user) return
-    const settings = getUserLowBalanceSettings(user.id)
-    return {
-      ...settings,
-      telegramLinked: false,
-      canReceive: false,
-    }
+  app.all('/api/user/settings/low-balance-alert', async (_request, reply) => {
+    return reply.code(410).send({ error: 'Low-balance alerts have been retired' })
   })
 
-  app.post<{ Body: { enabled?: boolean } }>('/api/user/alerts/low-balance', async (request, reply) => {
-    const user = requireCustomer(request, reply)
-    if (!user) return
-    try {
-      const enabled = Boolean(request.body?.enabled)
-      const settings = setUserLowBalanceSettings(user.id, { enabled })
-      return {
-        ...settings,
-        telegramLinked: false,
-        canReceive: false,
-      }
-    } catch (reason) {
-      return reply.code(400).send({
-        error: reason instanceof Error ? reason.message : 'Invalid alert settings',
-      })
-    }
+  app.all('/api/user/alerts/low-balance', async (_request, reply) => {
+    return reply.code(410).send({ error: 'Low-balance alerts have been retired' })
   })
 
 
@@ -1279,15 +1232,7 @@ export async function registerRoutes(app: FastifyInstance) {
       tags: parseJson<string[]>(row.tags_json),
       health: health[row.id] ?? 'no_data',
     }))
-    const telegramBonus = getTelegramBonusSettings().bonusTokens
-    const restrictedTokens = getRestrictedTokens(user.id)
-    const hasPaidTokens = regularSpendableTokens(user.id) > 0
-    const anthropicBonusNotice =
-      !hasPaidTokens &&
-      restrictedTokens > 0 &&
-      restrictedTokens >= Math.ceil(telegramBonus * 0.9) &&
-      user.balanceTokens > 0
-    return { models, healthCheckedAt, anthropicBonusNotice }
+    return { models, healthCheckedAt }
   })
 
   app.get<{
@@ -1834,12 +1779,6 @@ export async function registerRoutes(app: FastifyInstance) {
     const provider = providerBalanceTotals()
     const providerKeys = listProviderKeys().keys
     const apinex = provider.byProvider?.apinex ?? { keyCount: 0, balanceTokens: 0, balanceUsdCents: 0 }
-    const dailyReport = await getRevenueSinceLastDailyReport().catch(() => ({
-      totalRevenueUsd: 0,
-      sinceIso: new Date().toISOString(),
-      sol: 0,
-      cardUsd: 0,
-    }))
     return {
       stats: {
         users: users.count,
@@ -1860,7 +1799,6 @@ export async function registerRoutes(app: FastifyInstance) {
         balanceUsdCents: apinex.balanceUsdCents,
         byProvider: provider.byProvider ?? {},
       },
-      dailyReportRevenue: dailyReport,
       providerKeys,
       usage,
       activity,
@@ -1886,7 +1824,6 @@ export async function registerRoutes(app: FastifyInstance) {
     }[sort as 'listNo' | 'balance_tokens' | 'requests' | 'created_at']
     const where = query
       ? `WHERE lower(email) LIKE @q OR lower(name) LIKE @q OR lower(COALESCE(telegram_username, '')) LIKE @q
-          OR lower(COALESCE(solana_wallet, '')) LIKE @q
           OR lower(status) LIKE @q
           OR id IN (
             SELECT r.user_id FROM promo_redemptions r
@@ -1905,7 +1842,7 @@ export async function registerRoutes(app: FastifyInstance) {
         `WITH ranked_users AS (
            SELECT id, display_id, name, email, status, balance_tokens, requests,
                   created_at, last_seen_at,
-                  telegram_id, telegram_username, solana_wallet, auth_method,
+                  telegram_id, telegram_username, auth_method,
                   ROW_NUMBER() OVER (
                     ORDER BY COALESCE(display_id, 0) ASC, datetime(created_at) ASC, id ASC
                   ) AS list_no
@@ -1928,7 +1865,6 @@ export async function registerRoutes(app: FastifyInstance) {
       last_seen_at: string | null
       telegram_id: string | null
       telegram_username: string | null
-      solana_wallet: string | null
       auth_method: string | null
     }>
 
@@ -1968,8 +1904,7 @@ export async function registerRoutes(app: FastifyInstance) {
       offset,
       limit,
       hasMore: offset + rows.length < total,
-      users: rows.map((row, rowIndex) => {
-        const wallet = row.solana_wallet?.trim() || null
+      users: rows.map((row) => {
         const allowance = allowances.get(row.id) ?? null
         return {
           id: row.id,
@@ -1994,8 +1929,7 @@ export async function registerRoutes(app: FastifyInstance) {
             : row.telegram_id
               ? row.telegram_id
               : null,
-          solana_wallet: wallet,
-          auth_method: row.auth_method || (wallet ? 'wallet' : 'email'),
+          auth_method: row.auth_method || 'email',
         }
       }),
     }
@@ -2472,8 +2406,22 @@ export async function registerRoutes(app: FastifyInstance) {
     const primaryRoute = nextRoutes[0]
     const nextWeight = body.tokenWeight == null ? Number(current.token_weight ?? 1) : Number(body.tokenWeight)
     if (!Number.isFinite(nextWeight) || nextWeight < 0) return reply.code(400).send({ error: 'tokenWeight must be 0 or a positive number' })
+    const isFree = nextProvider.trim().toLowerCase() === 'free' || nextModelId.startsWith('free/')
+    const isJev = !isFree && (normalizeProviderName(nextProvider) === 'Jev Group' || isDecisionCatalogModelId(nextModelId) || isDecisionCatalogModelId(primaryRoute.modelId))
+    const inputMicros = isFree ? 0 : Math.round(Number(body.inputPrice ?? Number(current.input_price_micros ?? 0) / 1_000_000) * 1_000_000)
+    const outputMicros = isFree ? 0 : Math.round(Number(body.outputPrice ?? Number(current.output_price_micros ?? 0) / 1_000_000) * 1_000_000)
+    const weight = isFree
+      ? (nextWeight > 0 ? nextWeight : (Number(current.token_weight) > 0 ? Number(current.token_weight) : 1))
+      : (inputMicros > 0 ? 0 : (nextWeight > 0 ? nextWeight : 1))
+    const storedProvider = isFree
+      ? 'Free'
+      : isJev
+        ? 'Jev Group'
+        : inputMicros > 0
+          ? (familyFromUpstreamId(primaryRoute.modelId) ?? nextProvider)
+          : providerForTokenWeight(weight, primaryRoute.modelId, nextProvider)
     const status = body.status === 'paused' ? 'paused' : body.status === 'active' ? 'active' : String(current.status)
-    const tags = Array.isArray(body.tags) ? body.tags : JSON.parse(String(current.tags_json ?? '[]'))
+    const tags = Array.isArray(body.tags) ? body.tags : safeParseTags(current.tags_json)
     const pricingRule = db.prepare(`SELECT id, active FROM pricing_rules WHERE model_id = ?`).get(modelId) as { id: string; active: number } | undefined
     const updateModel = db.prepare(`UPDATE model_catalog SET id = ?, upstream_id = ?, upstream_provider = ?, name = ?, provider = ?, context_window = ?, input_price_micros = ?, output_price_micros = ?, token_weight = ?, status = ?, tags_json = ? WHERE id = ?`)
     const insertPricing = db.prepare(`INSERT INTO pricing_rules (id, model_id, input_multiplier, output_multiplier, active, updated_at) VALUES (?, ?, ?, ?, ?, ?)`)
@@ -2487,12 +2435,16 @@ export async function registerRoutes(app: FastifyInstance) {
       db.prepare('DELETE FROM model_upstream_routes WHERE model_id = ?').run(modelId)
 
       updateModel.run(
-        nextModelId, primaryRoute.modelId, primaryRoute.provider, nextName, nextProvider, nextContext,
-        Math.round(Number(body.inputPrice ?? Number(current.input_price_micros ?? 0) / 1_000_000) * 1_000_000),
-        Math.round(Number(body.outputPrice ?? Number(current.output_price_micros ?? 0) / 1_000_000) * 1_000_000),
-        nextWeight, status, JSON.stringify(tags), modelId,
+        nextModelId, primaryRoute.modelId, primaryRoute.provider, nextName, storedProvider, nextContext,
+        inputMicros,
+        outputMicros,
+        weight, status, JSON.stringify(tags), modelId,
       )
-      if (pricingRule) insertPricing.run(pricingRule.id, nextModelId, nextWeight, nextWeight, pricingRule.active, nowIso())
+      if (pricingRule) {
+        insertPricing.run(pricingRule.id, nextModelId, weight, weight, pricingRule.active, nowIso())
+      } else {
+        insertPricing.run(id('price'), nextModelId, weight, weight, 1, nowIso())
+      }
 
       const insertRoute = db.prepare(`INSERT INTO model_upstream_routes (model_id, position, upstream_provider, upstream_id) VALUES (?, ?, ?, ?)`)
       nextRoutes.forEach((route, index) => insertRoute.run(nextModelId, index + 1, route.provider, route.modelId))
@@ -2633,15 +2585,22 @@ export async function registerRoutes(app: FastifyInstance) {
       if (!Number.isFinite(tokenWeight) || tokenWeight < 0) {
         return reply.code(400).send({ error: 'tokenWeight must be 0 or a positive number' })
       }
+      const weight = tokenWeight > 0 ? tokenWeight : 1
       db.prepare('UPDATE model_catalog SET token_weight = ?, provider = ?, input_price_micros = 0, output_price_micros = 0 WHERE id = ?').run(
-        tokenWeight,
+        weight,
         'Free',
         modelId,
       )
-      db.prepare('INSERT INTO audit_logs (id, actor_email, action, target, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(
-        id('audit'), actor.email, 'pricing.updated', modelId, JSON.stringify({ tokenWeight }), nowIso(),
+      db.prepare('UPDATE pricing_rules SET input_multiplier = ?, output_multiplier = ?, updated_at = ? WHERE model_id = ?').run(
+        weight,
+        weight,
+        nowIso(),
+        modelId,
       )
-      return { ok: true, tokenWeight, provider: 'Free', dollarsPer1M: 0 }
+      db.prepare('INSERT INTO audit_logs (id, actor_email, action, target, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(
+        id('audit'), actor.email, 'pricing.updated', modelId, JSON.stringify({ tokenWeight: weight }), nowIso(),
+      )
+      return { ok: true, tokenWeight: weight, provider: 'Free', dollarsPer1M: 0 }
     }
     const shared = request.body.dollarsPer1M
     const inputPrice = Number(request.body.inputDollarsPer1M ?? shared)
@@ -2673,7 +2632,6 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.get('/api/admin/balances', async (request, reply) => {
     if (!requireAuth(request, reply)) return
-    const tg = getTelegramBonusSettings()
     return {
       transactions: db.prepare(`
       SELECT t.*, u.name, u.email FROM balance_transactions t
@@ -2787,7 +2745,6 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.get('/api/admin/settings', async (request, reply) => {
     if (!requireAuth(request, reply)) return
-    const tg = getTelegramBonusSettings()
     const referral = getReferralSettings()
     return {
       billing: {
@@ -3340,26 +3297,34 @@ export async function registerRoutes(app: FastifyInstance) {
       if (!userId) return reply.code(400).send({ error: 'Email is required' })
 
       const amountCents = Math.round((amountTokens / TOKENS_PER_USD) * 100)
-      const transaction = db.transaction(() => {
-        db.prepare('UPDATE users SET balance_tokens = balance_tokens + ? WHERE id = ?').run(amountTokens, userId)
-        db.prepare(
-          `INSERT INTO balance_transactions
-            (id, user_id, type, amount_cents, amount_tokens, note, status, created_at)
-           VALUES (?, ?, 'adjustment', ?, ?, ?, 'completed', ?)`,
-        ).run(id('txn'), userId, amountCents, amountTokens, note, nowIso())
-        db.prepare(
-          'INSERT INTO audit_logs (id, actor_email, action, target, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-        ).run(
-          id('audit'),
-          actor.email,
-          'balance.adjusted',
-          userId,
-          JSON.stringify({ amountUsd: amountCents / 100, note, email: email || null }),
-          nowIso(),
-        )
-      })
-      transaction()
-      if (amountTokens > 0) clearUserLowBalanceNotice(userId)
+      try {
+        const transaction = db.transaction(() => {
+          const current = db.prepare('SELECT balance_tokens FROM users WHERE id = ?').get(userId) as { balance_tokens: number } | undefined
+          if (!current) throw new Error('User not found')
+          if (amountTokens < 0 && (current.balance_tokens + amountTokens) < 0) {
+            throw new Error('Balance adjustment cannot drive balance below zero')
+          }
+          db.prepare('UPDATE users SET balance_tokens = balance_tokens + ? WHERE id = ?').run(amountTokens, userId)
+          db.prepare(
+            `INSERT INTO balance_transactions
+              (id, user_id, type, amount_cents, amount_tokens, note, status, created_at)
+             VALUES (?, ?, 'adjustment', ?, ?, ?, 'completed', ?)`,
+          ).run(id('txn'), userId, amountCents, amountTokens, note, nowIso())
+          db.prepare(
+            'INSERT INTO audit_logs (id, actor_email, action, target, metadata_json, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+          ).run(
+            id('audit'),
+            actor.email,
+            'balance.adjusted',
+            userId,
+            JSON.stringify({ amountUsd: amountCents / 100, note, email: email || null }),
+            nowIso(),
+          )
+        })
+        transaction()
+      } catch (err: any) {
+        return reply.code(400).send({ error: err.message || 'Balance adjustment failed' })
+      }
       return { ok: true, amountUsd: amountCents / 100 }
     },
   )
@@ -3397,11 +3362,10 @@ export async function registerRoutes(app: FastifyInstance) {
       const user = db.prepare(`
         SELECT id FROM users
         WHERE lower(email) = lower(?)
-           OR lower(solana_wallet) = lower(?)
            OR id = ?
            OR CAST(display_id AS TEXT) = ?
         LIMIT 1
-      `).get(userQuery, userQuery, userQuery, userQuery) as { id: string } | undefined
+      `).get(userQuery, userQuery, userQuery) as { id: string } | undefined
 
       if (!user) {
         return { events: [], userNotFound: true }

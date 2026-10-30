@@ -19,16 +19,19 @@ async function checkLocalHealth() {
     if (!response.ok) {
       healthFailStreak += 1
       if (healthFailStreak >= FAIL_STREAK_ALERT) {
-              }
+        console.warn(`[ops-monitor] Health check failed with status ${response.status} (streak: ${healthFailStreak})`)
+      }
       return
     }
     if (latencyMs > 3_000) {
-          }
+      console.warn(`[ops-monitor] Health check slow: ${latencyMs}ms`)
+    }
     healthFailStreak = 0
   } catch (reason) {
     healthFailStreak += 1
     if (healthFailStreak >= FAIL_STREAK_ALERT) {
-          }
+      console.warn(`[ops-monitor] Health check request failed (streak: ${healthFailStreak}):`, reason)
+    }
   }
 }
 
@@ -40,7 +43,8 @@ function checkProviderPools() {
   const empty = critical.filter((provider) => pickProviderSecrets(provider).length === 0)
   if (empty.length === 0) return
   lastPoolAlertAt = now
-  }
+  console.warn(`[ops-monitor] Critical provider pool empty: ${empty.join(', ')}`)
+}
 
 export function startOpsMonitor() {
   if (timer) return
