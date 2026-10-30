@@ -1,6 +1,11 @@
 import { db, id, nowIso } from './db.js'
 import { chargeTokens, isFreeWeight } from '../shared/billing.js'
 import { debitApiTokens, debitRegularTokens } from './restrictedCredits.js'
+import {
+  releaseFreeTierReservation,
+  settleFreeTierReservation,
+  tryReserveFreeTierTokens,
+} from './subscriptions.js'
 
 /** Default max output when client omits max_tokens / max_output_tokens. */
 const DEFAULT_MAX_OUTPUT_TOKENS = 4_096
@@ -24,10 +29,30 @@ export type TokenReservationRow = {
   restricted_credits_allowed: number
   charged_tokens: number
   status: 'open' | 'settled' | 'released' | 'expired'
+  is_free_model?: number
+  free_hold_type?: string | null
+  free_target_id?: string | null
+  free_period_key?: string | null
   created_at: string
   updated_at: string
   expires_at: string
   settled_at: string | null
+}
+
+{
+  const cols = db.prepare('PRAGMA table_info(token_reservations)').all() as Array<{ name: string }>
+  if (!cols.some((c) => c.name === 'is_free_model')) {
+    db.exec('ALTER TABLE token_reservations ADD COLUMN is_free_model INTEGER NOT NULL DEFAULT 0')
+  }
+  if (!cols.some((c) => c.name === 'free_hold_type')) {
+    db.exec('ALTER TABLE token_reservations ADD COLUMN free_hold_type TEXT')
+  }
+  if (!cols.some((c) => c.name === 'free_target_id')) {
+    db.exec('ALTER TABLE token_reservations ADD COLUMN free_target_id TEXT')
+  }
+  if (!cols.some((c) => c.name === 'free_period_key')) {
+    db.exec('ALTER TABLE token_reservations ADD COLUMN free_period_key TEXT')
+  }
 }
 
 function textCharCount(value: unknown): number {
@@ -123,7 +148,60 @@ export function tryReserveTokens(input: {
   path?: string | null
   allowRestrictedCredits?: boolean
   signal?: AbortSignal
-}): { ok: true; reservationId: string; reservedTokens: number } | { ok: false; error: string; status: 402 } {
+  freeModel?: boolean
+  estimatedFreeTokens?: number
+}): { ok: true; reservationId: string; reservedTokens: number } | { ok: false; error: string; status: number } {
+  if (input.freeModel) {
+    const reservationId = id('tres')
+    const createdAt = nowIso()
+    const expiresAt = new Date(Date.now() + RESERVATION_TTL_MS).toISOString()
+    const estimated = Math.max(1, Math.floor(Number(input.estimatedFreeTokens) || 0))
+
+    const freeHold = tryReserveFreeTierTokens(input.userId, estimated)
+    if (!freeHold.ok) {
+      return {
+        ok: false as const,
+        error: freeHold.error,
+        status: 402 as const,
+      }
+    }
+
+    db.prepare(
+      `INSERT INTO token_reservations
+        (id, user_id, api_key_id, model_id, path, reserved_tokens, charged_tokens, status, is_free_model, free_hold_type, free_target_id, free_period_key, created_at, updated_at, expires_at, settled_at)
+       VALUES (?, ?, ?, ?, ?, ?, 0, 'open', 1, ?, ?, ?, ?, ?, ?, NULL)`,
+    ).run(
+      reservationId,
+      input.userId,
+      input.apiKeyId,
+      input.modelId ?? null,
+      input.path ?? null,
+      freeHold.reservedTokens,
+      freeHold.holdType,
+      freeHold.targetId,
+      freeHold.periodKey ?? null,
+      createdAt,
+      createdAt,
+      expiresAt,
+    )
+
+    if (input.signal) {
+      const onAbort = () => {
+        try {
+          releaseReservation(reservationId)
+        } catch {
+          /* ignore */
+        }
+      }
+      input.signal.addEventListener('abort', onAbort, { once: true })
+      reservationAbortCleanups.set(reservationId, () => {
+        input.signal?.removeEventListener('abort', onAbort)
+      })
+    }
+
+    return { ok: true as const, reservationId, reservedTokens: freeHold.reservedTokens }
+  }
+
   if (input.signal?.aborted) {
     return { ok: false, error: 'Request aborted', status: 402 }
   }
@@ -314,14 +392,42 @@ export function settleReservation(
 
     if (row.status !== 'open') return { ok: false, charged: 0, refunded: 0 }
 
+    const updatedAt = nowIso()
     const reserved = Math.max(0, row.reserved_tokens)
+
+    if (row.is_free_model) {
+      settleFreeTierReservation({
+        userId: row.user_id,
+        holdType: (row.free_hold_type || 'free_tier') as any,
+        targetId: row.free_target_id || row.user_id,
+        periodKey: row.free_period_key || undefined,
+        reservedTokens: row.reserved_tokens,
+        actualTokens: charge,
+      })
+
+      db.prepare(
+        `UPDATE token_reservations
+         SET status = 'settled',
+             charged_tokens = ?,
+             updated_at = ?,
+             settled_at = ?
+         WHERE id = ? AND status = 'open'`,
+      ).run(charge, updatedAt, updatedAt, reservationId)
+
+      const cleanup = reservationAbortCleanups.get(reservationId)
+      if (cleanup) {
+        reservationAbortCleanups.delete(reservationId)
+        try { cleanup() } catch { /* ignore */ }
+      }
+
+      return { ok: true, charged: charge, refunded: Math.max(0, row.reserved_tokens - charge) }
+    }
     const applied = Math.min(charge, reserved)
     const refund = Math.max(0, reserved - applied)
     const overage = Math.max(0, charge - reserved)
     const restrictedReserved = Math.max(0, row.reserved_restricted_tokens || 0)
     const restrictedApplied = Math.min(applied, restrictedReserved)
     const restrictedRefund = Math.max(0, restrictedReserved - restrictedApplied)
-    const updatedAt = nowIso()
 
     if (refund > 0) {
       db.prepare(
@@ -386,9 +492,36 @@ export function releaseReservation(reservationId: string): { ok: boolean; refund
 
     if (row.status !== 'open') return { ok: false, refunded: 0 }
 
-    const reserved = Math.max(0, row.reserved_tokens)
-    const restrictedReserved = Math.max(0, row.reserved_restricted_tokens || 0)
     const updatedAt = nowIso()
+    const reserved = Math.max(0, row.reserved_tokens)
+
+    if (row.is_free_model) {
+      releaseFreeTierReservation({
+        userId: row.user_id,
+        holdType: (row.free_hold_type || 'free_tier') as any,
+        targetId: row.free_target_id || row.user_id,
+        periodKey: row.free_period_key || undefined,
+        reservedTokens: row.reserved_tokens,
+      })
+
+      db.prepare(
+        `UPDATE token_reservations
+         SET status = 'released',
+             charged_tokens = 0,
+             updated_at = ?,
+             settled_at = ?
+         WHERE id = ? AND status = 'open'`,
+      ).run(updatedAt, updatedAt, reservationId)
+
+      const cleanup = reservationAbortCleanups.get(reservationId)
+      if (cleanup) {
+        reservationAbortCleanups.delete(reservationId)
+        try { cleanup() } catch { /* ignore */ }
+      }
+
+      return { ok: true, refunded: Math.max(0, row.reserved_tokens) }
+    }
+    const restrictedReserved = Math.max(0, row.reserved_restricted_tokens || 0)
 
     if (reserved > 0) {
       db.prepare(

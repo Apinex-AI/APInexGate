@@ -456,8 +456,8 @@ function recordUsage(input: {
   // Zero-cost models never touch the balance, so they are metered against the
   // daily free allowance / active subscription instead. Resolved here (one PK
   // lookup) so every call site stays uniform.
-  if (input.status === 'ok' && isFreeMeteredModel(input.modelId)) {
-    const weight = 1
+  if (input.status === 'ok' && isFreeMeteredModel(input.modelId) && !input.reservationId) {
+    const weight = typeof input.allowanceWeight === 'number' && input.allowanceWeight > 0 ? input.allowanceWeight : 1
     const metered = chargeTokens(input.inputTokens, input.outputTokens, weight)
     if (metered > 0) consumeFreeTierTokens(input.userId, metered)
   }
@@ -481,7 +481,11 @@ function recordUsage(input: {
 
   if (input.reservationId) {
     if (input.status === 'ok' || (input.clientDisconnected && input.costTokens > 0)) {
-      settleReservation(input.reservationId, Math.max(0, input.costTokens))
+      const weight = typeof input.allowanceWeight === 'number' && input.allowanceWeight > 0 ? input.allowanceWeight : 1
+      const charge = isFreeMeteredModel(input.modelId)
+        ? chargeTokens(input.inputTokens, input.outputTokens, weight)
+        : Math.max(0, input.costTokens)
+      settleReservation(input.reservationId, charge)
       // Hold already debited spendable balance; check after settle/refund.
       maybeNotifyUserLowBalance(input.userId)
     } else {
@@ -1974,12 +1978,6 @@ async function proxyModelRequest(input: {
           ),
         ),
       }
-  if (freeModel) {
-    const access = getFreeTierAccess(auth.user.id)
-    if (!access.unlimited && access.remaining !== null && reservationEstimate.costTokens > access.remaining) {
-      return sendError(402, `Free-model allowance is too low for this request. It requires up to ${reservationEstimate.costTokens.toLocaleString('en-US')} weighted tokens.`, 'billing_error')
-    }
-  }
   const clientAbortController = new AbortController()
   const onClientClose = () => {
     if (!reply.raw.writableEnded) {
@@ -2001,6 +1999,8 @@ async function proxyModelRequest(input: {
     path: `/v1/${path}`,
     allowRestrictedCredits: true,
     signal: clientAbortController.signal,
+    freeModel,
+    estimatedFreeTokens: freeModel ? reservationEstimate.costTokens : undefined,
   })
   if (!reservation.ok) {
     request.raw.off('close', onClientClose)
@@ -2996,17 +2996,6 @@ async function proxyDecisionRequest(input: {
           ),
         ),
       }
-  if (freeModel) {
-    const access = getFreeTierAccess(auth.user.id)
-    if (!access.unlimited && access.remaining !== null && reservationEstimate.costTokens > access.remaining) {
-      return sendError(
-        402,
-        `Free-model allowance is too low for this request. It requires up to ${reservationEstimate.costTokens.toLocaleString('en-US')} tokens.`,
-        'billing_error',
-      )
-    }
-  }
-
   const clientAbortController = new AbortController()
   const onClientClose = () => {
     if (!reply.raw.writableEnded) {
@@ -3028,6 +3017,8 @@ async function proxyDecisionRequest(input: {
     path: '/v1/decisions',
     allowRestrictedCredits: true,
     signal: clientAbortController.signal,
+    freeModel,
+    estimatedFreeTokens: freeModel ? reservationEstimate.costTokens : undefined,
   })
   if (!reservation.ok) {
     request.raw.off('close', onClientClose)

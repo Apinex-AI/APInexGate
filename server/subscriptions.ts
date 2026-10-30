@@ -64,6 +64,7 @@ export function ensureSubscriptionSchema() {
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       period_key TEXT NOT NULL,
       tokens_used INTEGER NOT NULL DEFAULT 0,
+      tokens_reserved INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL,
       PRIMARY KEY (user_id, period_key)
     );
@@ -78,6 +79,7 @@ export function ensureSubscriptionSchema() {
       kind TEXT NOT NULL,
       token_limit INTEGER NOT NULL DEFAULT 0,
       tokens_used INTEGER NOT NULL DEFAULT 0,
+      tokens_reserved INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL,
       source TEXT NOT NULL,
       source_ref TEXT,
@@ -101,6 +103,16 @@ export function ensureSubscriptionSchema() {
 }
 
 ensureSubscriptionSchema()
+{
+  const freeCols = db.prepare('PRAGMA table_info(free_tier_usage)').all() as Array<{ name: string }>
+  if (!freeCols.some((c) => c.name === 'tokens_reserved')) {
+    db.exec('ALTER TABLE free_tier_usage ADD COLUMN tokens_reserved INTEGER NOT NULL DEFAULT 0')
+  }
+  const subCols = db.prepare('PRAGMA table_info(user_subscriptions)').all() as Array<{ name: string }>
+  if (!subCols.some((c) => c.name === 'tokens_reserved')) {
+    db.exec('ALTER TABLE user_subscriptions ADD COLUMN tokens_reserved INTEGER NOT NULL DEFAULT 0')
+  }
+}
 
 function clampInt(value: unknown, fallback: number, min = 0): number {
   const n = Math.floor(Number(value))
@@ -301,9 +313,15 @@ export const getActiveSubscription = getActiveExtraTokenPack
 
 function freeUsedToday(userId: string, periodKey = utcPeriodKey()) {
   const row = db
-    .prepare(`SELECT tokens_used FROM free_tier_usage WHERE user_id = ? AND period_key = ?`)
-    .get(userId, periodKey) as { tokens_used: number } | undefined
-  return Math.max(0, Number(row?.tokens_used ?? 0))
+    .prepare(
+      `SELECT tokens_used, COALESCE(tokens_reserved, 0) AS tokens_reserved
+       FROM free_tier_usage WHERE user_id = ? AND period_key = ?`,
+    )
+    .get(userId, periodKey) as { tokens_used: number; tokens_reserved: number } | undefined
+  return {
+    used: Math.max(0, Number(row?.tokens_used ?? 0)),
+    reserved: Math.max(0, Number(row?.tokens_reserved ?? 0)),
+  }
 }
 
 /**
@@ -318,7 +336,9 @@ export function getFreeTierAccess(userId: string): FreeTierAccess {
 
   if (rawRow) {
     const unlimited = normalizeKind(rawRow.kind) === 'unlimited'
-    const remaining = unlimited ? null : Math.max(0, rawRow.token_limit - rawRow.tokens_used)
+    const reserved = Math.max(0, Number((rawRow as any).tokens_reserved ?? 0))
+    const totalCommitted = rawRow.tokens_used + reserved
+    const remaining = unlimited ? null : Math.max(0, rawRow.token_limit - totalCommitted)
     const planKey = isSubscriptionPlanKey(rawRow.plan_key) && rawRow.plan_key !== 'custom' ? rawRow.plan_key : null
     return {
       allowed: unlimited || (remaining ?? 0) > 0,
@@ -337,20 +357,154 @@ export function getFreeTierAccess(userId: string): FreeTierAccess {
 
   const todayKey = utcPeriodKey()
   const dailyLimit = getFreeDailyTokens()
-  const used = freeUsedToday(userId, todayKey)
+  const usage = freeUsedToday(userId, todayKey)
+  const totalCommitted = usage.used + usage.reserved
   return {
-    allowed: used < dailyLimit,
+    allowed: totalCommitted < dailyLimit,
     mode: 'free',
     unlimited: false,
     limit: dailyLimit,
-    used,
-    remaining: Math.max(0, dailyLimit - used),
+    used: usage.used,
+    remaining: Math.max(0, dailyLimit - totalCommitted),
     planKey: null,
     planLabel: 'FREE',
     expiresAt: null,
     resetsAt: nextUtcResetIso(),
     telegramVerified: true,
   }
+}
+
+export type ReserveFreeTierResult =
+  | { ok: true; holdType: 'subscription' | 'free_tier'; targetId: string; periodKey?: string; reservedTokens: number }
+  | { ok: false; remaining: number; limit: number; error: string }
+
+/**
+ * Atomically reserves free-tier or subscription tokens before sending requests upstream.
+ * Uses an immediate SQLite transaction to eliminate concurrency / race condition bypasses (H-04).
+ */
+export function tryReserveFreeTierTokens(userId: string, requestedTokens: number): ReserveFreeTierResult {
+  const amount = Math.max(0, Math.floor(Number(requestedTokens) || 0))
+  const now = nowIso()
+  const todayKey = utcPeriodKey()
+
+  return db.transaction(() => {
+    // 1. Subscription check
+    const rawRow = loadActiveSubscriptionRow(userId)
+    if (rawRow) {
+      const unlimited = normalizeKind(rawRow.kind) === 'unlimited'
+      if (unlimited) {
+        return { ok: true as const, holdType: 'subscription' as const, targetId: rawRow.id, reservedTokens: 0 }
+      }
+      const reserved = Math.max(0, Number((rawRow as any).tokens_reserved ?? 0))
+      const projected = rawRow.tokens_used + reserved + amount
+      if (projected > rawRow.token_limit) {
+        const remaining = Math.max(0, rawRow.token_limit - (rawRow.tokens_used + reserved))
+        return {
+          ok: false as const,
+          remaining,
+          limit: rawRow.token_limit,
+          error: `Subscription token limit would be exceeded. Remaining: ${remaining.toLocaleString('en-US')}, required: ${amount.toLocaleString('en-US')}`,
+        }
+      }
+      db.prepare(
+        `UPDATE user_subscriptions
+         SET tokens_reserved = COALESCE(tokens_reserved, 0) + ?, updated_at = ?
+         WHERE id = ?`,
+      ).run(amount, now, rawRow.id)
+      return { ok: true as const, holdType: 'subscription' as const, targetId: rawRow.id, reservedTokens: amount }
+    }
+
+    // 2. Daily free allowance check
+    const dailyLimit = getFreeDailyTokens()
+    const usage = freeUsedToday(userId, todayKey)
+    const projected = usage.used + usage.reserved + amount
+
+    if (projected > dailyLimit) {
+      const remaining = Math.max(0, dailyLimit - (usage.used + usage.reserved))
+      return {
+        ok: false as const,
+        remaining,
+        limit: dailyLimit,
+        error: `Daily free allowance would be exceeded. Remaining: ${remaining.toLocaleString('en-US')}, required: ${amount.toLocaleString('en-US')}`,
+      }
+    }
+
+    db.prepare(
+      `INSERT INTO free_tier_usage (user_id, period_key, tokens_used, tokens_reserved, updated_at)
+       VALUES (?, ?, 0, ?, ?)
+       ON CONFLICT(user_id, period_key)
+       DO UPDATE SET tokens_reserved = COALESCE(tokens_reserved, 0) + excluded.tokens_reserved, updated_at = excluded.updated_at`,
+    ).run(userId, todayKey, amount, now)
+
+    return { ok: true as const, holdType: 'free_tier' as const, targetId: userId, periodKey: todayKey, reservedTokens: amount }
+  })()
+}
+
+export function settleFreeTierReservation(input: {
+  userId: string
+  holdType: 'subscription' | 'free_tier'
+  targetId: string
+  periodKey?: string
+  reservedTokens: number
+  actualTokens: number
+}) {
+  const now = nowIso()
+  const reserved = Math.max(0, Math.floor(Number(input.reservedTokens) || 0))
+  const actual = Math.max(0, Math.floor(Number(input.actualTokens) || 0))
+
+  db.transaction(() => {
+    if (input.holdType === 'subscription') {
+      db.prepare(
+        `UPDATE user_subscriptions
+         SET tokens_reserved = MAX(0, COALESCE(tokens_reserved, 0) - ?),
+             tokens_used = tokens_used + ?,
+             updated_at = ?
+         WHERE id = ?`,
+      ).run(reserved, actual, now, input.targetId)
+    } else {
+      const periodKey = input.periodKey || utcPeriodKey()
+      db.prepare(
+        `INSERT INTO free_tier_usage (user_id, period_key, tokens_used, tokens_reserved, updated_at)
+         VALUES (?, ?, ?, 0, ?)
+         ON CONFLICT(user_id, period_key)
+         DO UPDATE SET
+           tokens_reserved = MAX(0, COALESCE(tokens_reserved, 0) - ?),
+           tokens_used = tokens_used + ?,
+           updated_at = excluded.updated_at`,
+      ).run(input.userId, periodKey, actual, now, reserved, actual)
+    }
+  })()
+}
+
+export function releaseFreeTierReservation(input: {
+  userId: string
+  holdType: 'subscription' | 'free_tier'
+  targetId: string
+  periodKey?: string
+  reservedTokens: number
+}) {
+  const reserved = Math.max(0, Math.floor(Number(input.reservedTokens) || 0))
+  if (reserved <= 0) return
+
+  const now = nowIso()
+  db.transaction(() => {
+    if (input.holdType === 'subscription') {
+      db.prepare(
+        `UPDATE user_subscriptions
+         SET tokens_reserved = MAX(0, COALESCE(tokens_reserved, 0) - ?),
+             updated_at = ?
+         WHERE id = ?`,
+      ).run(reserved, now, input.targetId)
+    } else {
+      const periodKey = input.periodKey || utcPeriodKey()
+      db.prepare(
+        `UPDATE free_tier_usage
+         SET tokens_reserved = MAX(0, COALESCE(tokens_reserved, 0) - ?),
+             updated_at = ?
+         WHERE user_id = ? AND period_key = ?`,
+      ).run(reserved, now, input.userId, periodKey)
+    }
+  })()
 }
 
 /**
@@ -844,7 +998,8 @@ export function getAdminUserAllowances() {
         expiresAt: r.expires_at,
       })
     } else {
-      const used = freeUsedToday(r.id)
+      const usage = freeUsedToday(r.id)
+      const used = usage.used
       map.set(r.id, {
         planKey: null,
         planLabel: 'FREE',
