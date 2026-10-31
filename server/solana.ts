@@ -1,4 +1,4 @@
-import { db, nowIso } from './db.js'
+import { db } from './db.js'
 import { claimPaymentSignatureOrThrow, type PaymentFlow } from './paymentSignatures.js'
 import { timingSafeCompare } from './crypto.js'
 
@@ -69,25 +69,15 @@ export function validateSolanaLamports(
 }
 
 /**
- * Verifies a Solana transaction signature and protects against replay/reuse.
+ * Direct on-chain Solana transaction verification is disabled.
  */
-export function verifySolanaTransactionSignature(input: {
+export function verifySolanaTransactionSignature(_input: {
   signature: string
   flow: PaymentFlow
   paymentId: string
   userId?: string | null
 }) {
-  const sig = String(input.signature || '').trim()
-  if (!sig) throw new Error('Transaction signature required')
-  if (!isValidSolanaSignature(sig)) {
-    throw new Error('Invalid Solana transaction signature format')
-  }
-  claimPaymentSignatureOrThrow({
-    signature: sig,
-    flow: input.flow,
-    paymentId: input.paymentId,
-    userId: input.userId,
-  })
+  throw new Error('Direct Solana transaction verification is disabled')
 }
 
 /**
@@ -98,7 +88,9 @@ export function compareSolanaAddresses(a: string, b: string): boolean {
 }
 
 /**
- * Process a Solana payment with replay protection and amount bounds inside an immediate transaction.
+ * Direct Solana payment processing is disabled.
+ * Replay protection claims the signature across flows to prevent reuse, but
+ * direct on-chain submission / automated confirmation is completely disabled.
  */
 export function processSolanaPayment(input: {
   paymentId: string
@@ -107,7 +99,7 @@ export function processSolanaPayment(input: {
   expectedLamports?: bigint | number
   userId: string
   flow?: PaymentFlow
-}): { ok: true; paymentId: string; amountLamports: bigint } {
+}): { ok: true; disabled: true; paymentId: string; amountLamports: bigint } {
   const lamports = validateSolanaLamports(input.amountLamports)
   if (input.expectedLamports != null) {
     const expected = validateSolanaLamports(input.expectedLamports)
@@ -131,15 +123,7 @@ export function processSolanaPayment(input: {
       userId: input.userId,
     })
 
-    const when = nowIso()
-    try {
-      db.prepare(
-        `UPDATE crypto_payments
-         SET status = 'finished', credited_at = ?, payment_id = ?, updated_at = ?
-         WHERE id = ? AND credited_at IS NULL`,
-      ).run(when, sig, when, input.paymentId)
-    } catch {}
-
-    return { ok: true as const, paymentId: input.paymentId, amountLamports: lamports }
+    // Direct on-chain processing is disabled; do not auto-confirm crypto_payments
+    return { ok: true as const, disabled: true as const, paymentId: input.paymentId, amountLamports: lamports }
   }).immediate()
 }

@@ -66,12 +66,17 @@ function backfillExistingSignatures() {
       }>
       const names = new Set(columns.map((column) => column.name))
       if (!names.has('payment_id') || !names.has('credited_at')) continue
-      // Only on-chain rows are in scope. `crypto_payments` predates the provider
-      // column on some deployments, so fall back to the asset when it is absent.
-      const onChainFilter = names.has('provider')
-        ? `(provider = 'solana' OR asset = 'SOL')`
-        : `asset = 'SOL'`
-      if (!names.has('provider') && !names.has('asset')) continue
+      // Only on-chain rows are in scope when provider/asset columns exist.
+      // `crypto_payments` predates provider column on some deployments.
+      // Tables like `rpm_payments` have neither column, so all credited rows with payment_id are processed.
+      let onChainFilter = '1 = 1'
+      if (names.has('provider') && names.has('asset')) {
+        onChainFilter = `(provider = 'solana' OR asset = 'SOL')`
+      } else if (names.has('provider')) {
+        onChainFilter = `provider = 'solana'`
+      } else if (names.has('asset')) {
+        onChainFilter = `asset = 'SOL'`
+      }
 
       const rows = db
         .prepare(
@@ -94,7 +99,7 @@ function backfillExistingSignatures() {
         for (const row of rows) {
           claim.run(row.payment_id, source.flow, row.id, row.user_id, row.credited_at)
         }
-      })()
+      }).immediate()
     } catch {
       // A missing table or column on an older deployment must never block boot.
     }
@@ -202,7 +207,14 @@ export function claimPaymentSignatureOrThrow(input: {
   paymentId: string
   userId?: string | null
 }) {
-  const claim = claimPaymentSignature(input)
+  const signature = String(input.signature || '').trim()
+  if (!signature) {
+    throw new Error('Transaction signature required')
+  }
+  const claim = claimPaymentSignature({
+    ...input,
+    signature,
+  })
   if (!claim.ok) {
     throw new PaymentSignatureConflictError({
       flow: claim.conflict.flow,

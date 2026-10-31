@@ -38,8 +38,8 @@ export function ensurePlaygroundKey(userId: string) {
   db.prepare(
     `INSERT INTO api_keys
       (id, user_id, name, prefix, secret_hash, secret, spend_limit_tokens, spent_tokens, status, created_at, last_used_at)
-     VALUES (?, ?, ?, ?, ?, ?, NULL, 0, 'active', ?, NULL)`,
-  ).run(keyId, userId, PLAYGROUND_KEY_NAME, prefix, secretHash, secret, nowIso())
+     VALUES (?, ?, ?, ?, ?, NULL, NULL, 0, 'active', ?, NULL)`,
+  ).run(keyId, userId, PLAYGROUND_KEY_NAME, prefix, secretHash, nowIso())
   return keyId
 }
 

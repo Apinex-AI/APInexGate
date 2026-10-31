@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 
 import { CustomerShell } from './components/CustomerShell'
@@ -19,24 +19,26 @@ import { Models } from './pages/Models'
 import { Subscriptions } from './pages/Subscriptions'
 import { Playground } from './pages/Playground'
 import { Rpm } from './pages/Rpm'
-import { AdminAuth } from './admin/AdminAuth'
-import { AdminLayout } from './admin/AdminLayout'
-import { AdminDashboard } from './admin/pages/AdminDashboard'
-import { AdminUsers } from './admin/pages/AdminUsers'
-import { AdminProviders } from './admin/pages/AdminProviders'
-import { AdminModels } from './admin/pages/AdminModels'
-import { AdminBalances } from './admin/pages/AdminBalances'
-import { AdminPromos } from './admin/pages/AdminPromos'
-import { AdminSettings } from './admin/pages/AdminSettings'
-import { AdminSubscriptions } from './admin/pages/AdminSubscriptions'
-import { AdminUsage } from './admin/pages/AdminUsage'
-import { AdminStatistics } from './admin/pages/AdminStatistics'
-import { AdminRpm } from './admin/pages/AdminRpm'
-import { AdminPricing } from './admin/pages/AdminPricing'
-import { AdminApiKeys } from './admin/pages/AdminApiKeys'
-import { AdminAuditLogs } from './admin/pages/AdminAuditLogs'
-import { AdminLevels } from './admin/pages/AdminLevels'
-import { AdminEvent } from './admin/pages/AdminEvent'
+
+const AdminAuth = lazy(() => import('./admin/AdminAuth').then((m) => ({ default: m.AdminAuth })))
+const AdminLayout = lazy(() => import('./admin/AdminLayout').then((m) => ({ default: m.AdminLayout })))
+const AdminDashboard = lazy(() => import('./admin/pages/AdminDashboard').then((m) => ({ default: m.AdminDashboard })))
+const AdminUsers = lazy(() => import('./admin/pages/AdminUsers').then((m) => ({ default: m.AdminUsers })))
+const AdminProviders = lazy(() => import('./admin/pages/AdminProviders').then((m) => ({ default: m.AdminProviders })))
+const AdminModels = lazy(() => import('./admin/pages/AdminModels').then((m) => ({ default: m.AdminModels })))
+const AdminBalances = lazy(() => import('./admin/pages/AdminBalances').then((m) => ({ default: m.AdminBalances })))
+const AdminPromos = lazy(() => import('./admin/pages/AdminPromos').then((m) => ({ default: m.AdminPromos })))
+const AdminSettings = lazy(() => import('./admin/pages/AdminSettings').then((m) => ({ default: m.AdminSettings })))
+const AdminSubscriptions = lazy(() => import('./admin/pages/AdminSubscriptions').then((m) => ({ default: m.AdminSubscriptions })))
+const AdminUsage = lazy(() => import('./admin/pages/AdminUsage').then((m) => ({ default: m.AdminUsage })))
+const AdminStatistics = lazy(() => import('./admin/pages/AdminStatistics').then((m) => ({ default: m.AdminStatistics })))
+const AdminRpm = lazy(() => import('./admin/pages/AdminRpm').then((m) => ({ default: m.AdminRpm })))
+const AdminPricing = lazy(() => import('./admin/pages/AdminPricing').then((m) => ({ default: m.AdminPricing })))
+const AdminApiKeys = lazy(() => import('./admin/pages/AdminApiKeys').then((m) => ({ default: m.AdminApiKeys })))
+const AdminAuditLogs = lazy(() => import('./admin/pages/AdminAuditLogs').then((m) => ({ default: m.AdminAuditLogs })))
+const AdminLevels = lazy(() => import('./admin/pages/AdminLevels').then((m) => ({ default: m.AdminLevels })))
+const AdminEvent = lazy(() => import('./admin/pages/AdminEvent').then((m) => ({ default: m.AdminEvent })))
+
 import { UserAuth } from './auth/UserAuth'
 import { captureReferralFromUrl } from './auth/referral'
 import { DevelopersLayout } from './developers/DevelopersLayout'
@@ -58,7 +60,14 @@ import { isAdminConsoleHost } from '../shared/adminHosts'
 
 function adminUiAllowed() {
   if (typeof window === 'undefined') return false
-  return isAdminConsoleHost(window.location.hostname)
+  const host = window.location.hostname.toLowerCase()
+  const path = window.location.pathname.toLowerCase()
+  return (
+    path.startsWith('/admin') ||
+    host.startsWith('admin.') ||
+    host.startsWith('dev-admin.') ||
+    isAdminConsoleHost(host)
+  )
 }
 
 function ReferralLandingRedirect() {
@@ -108,24 +117,150 @@ export default function App() {
 
           {showAdmin ? (
             <>
-              <Route path="/admin/login" element={<AdminAuthPage />} />
-              <Route path="/admin" element={<AdminAuthLayout />}>
-                <Route index element={<AdminDashboard />} />
-                <Route path="users" element={<AdminUsers />} />
-                <Route path="api-keys" element={<AdminApiKeys />} />
-                <Route path="providers" element={<AdminProviders />} />
-                <Route path="models" element={<AdminModels />} />
-                <Route path="pricing" element={<AdminPricing />} />
-                <Route path="balances" element={<AdminBalances />} />
-                <Route path="promos" element={<AdminPromos />} />
-                <Route path="promo-event" element={<AdminEvent />} />
-                <Route path="levels" element={<AdminLevels />} />
-                <Route path="settings" element={<AdminSettings />} />
-                <Route path="rpm" element={<AdminRpm />} />
-                <Route path="subscriptions" element={<AdminSubscriptions />} />
-                <Route path="usage" element={<AdminUsage />} />
-                <Route path="statistics" element={<AdminStatistics />} />
-                <Route path="audit-logs" element={<AdminAuditLogs />} />
+              <Route
+                path="/admin/login"
+                element={
+                  <Suspense fallback={<div className="admin-loading" style={{ minHeight: '40vh' }} />}>
+                    <AdminAuthPage />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="/admin"
+                element={
+                  <Suspense fallback={<div className="admin-loading" style={{ minHeight: '40vh' }} />}>
+                    <AdminAuthLayout />
+                  </Suspense>
+                }
+              >
+                <Route
+                  index
+                  element={
+                    <Suspense fallback={<div className="admin-loading" style={{ minHeight: '40vh' }} />}>
+                      <AdminDashboard />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="users"
+                  element={
+                    <Suspense fallback={<div className="admin-loading" style={{ minHeight: '40vh' }} />}>
+                      <AdminUsers />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="api-keys"
+                  element={
+                    <Suspense fallback={<div className="admin-loading" style={{ minHeight: '40vh' }} />}>
+                      <AdminApiKeys />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="providers"
+                  element={
+                    <Suspense fallback={<div className="admin-loading" style={{ minHeight: '40vh' }} />}>
+                      <AdminProviders />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="models"
+                  element={
+                    <Suspense fallback={<div className="admin-loading" style={{ minHeight: '40vh' }} />}>
+                      <AdminModels />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="pricing"
+                  element={
+                    <Suspense fallback={<div className="admin-loading" style={{ minHeight: '40vh' }} />}>
+                      <AdminPricing />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="balances"
+                  element={
+                    <Suspense fallback={<div className="admin-loading" style={{ minHeight: '40vh' }} />}>
+                      <AdminBalances />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="promos"
+                  element={
+                    <Suspense fallback={<div className="admin-loading" style={{ minHeight: '40vh' }} />}>
+                      <AdminPromos />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="promo-event"
+                  element={
+                    <Suspense fallback={<div className="admin-loading" style={{ minHeight: '40vh' }} />}>
+                      <AdminEvent />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="levels"
+                  element={
+                    <Suspense fallback={<div className="admin-loading" style={{ minHeight: '40vh' }} />}>
+                      <AdminLevels />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="settings"
+                  element={
+                    <Suspense fallback={<div className="admin-loading" style={{ minHeight: '40vh' }} />}>
+                      <AdminSettings />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="rpm"
+                  element={
+                    <Suspense fallback={<div className="admin-loading" style={{ minHeight: '40vh' }} />}>
+                      <AdminRpm />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="subscriptions"
+                  element={
+                    <Suspense fallback={<div className="admin-loading" style={{ minHeight: '40vh' }} />}>
+                      <AdminSubscriptions />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="usage"
+                  element={
+                    <Suspense fallback={<div className="admin-loading" style={{ minHeight: '40vh' }} />}>
+                      <AdminUsage />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="statistics"
+                  element={
+                    <Suspense fallback={<div className="admin-loading" style={{ minHeight: '40vh' }} />}>
+                      <AdminStatistics />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="audit-logs"
+                  element={
+                    <Suspense fallback={<div className="admin-loading" style={{ minHeight: '40vh' }} />}>
+                      <AdminAuditLogs />
+                    </Suspense>
+                  }
+                />
                 <Route path="*" element={<Navigate to="/admin" replace />} />
               </Route>
             </>
@@ -167,14 +302,24 @@ function developerChildRoutes() {
 }
 
 function AdminAuthPage() {
-  return <AdminAuth>{() => <Navigate to="/admin" replace />}</AdminAuth>
+  return (
+    <Suspense fallback={<div className="admin-loading" style={{ minHeight: '40vh' }} />}>
+      <AdminAuth>{() => <Navigate to="/admin" replace />}</AdminAuth>
+    </Suspense>
+  )
 }
 
 function AdminAuthLayout() {
   return (
-    <AdminAuth>
-      {() => <AdminLayout />}
-    </AdminAuth>
+    <Suspense fallback={<div className="admin-loading" style={{ minHeight: '40vh' }} />}>
+      <AdminAuth>
+        {() => (
+          <Suspense fallback={<div className="admin-loading" style={{ minHeight: '40vh' }} />}>
+            <AdminLayout />
+          </Suspense>
+        )}
+      </AdminAuth>
+    </Suspense>
   )
 }
 

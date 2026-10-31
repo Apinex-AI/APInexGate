@@ -1,11 +1,30 @@
-/** Hostnames where the admin console UI + /api/auth + /api/admin are allowed. */
-const DEFAULT_ADMIN_HOSTS = new Set(['localhost', '127.0.0.1'])
+/** Hostnames where the admin console UI + /api/auth + /api/admin are allowed in non-production. */
+const DEFAULT_LOCAL_ADMIN_HOSTS = new Set(['localhost', '127.0.0.1', '::1'])
+
+function normalizeHost(hostname: string | null | undefined): string {
+  const raw = String(hostname ?? '').trim().toLowerCase()
+  if (!raw) return ''
+  const bracketMatch = raw.match(/^\[([a-f0-9:]+)\](?::\d+)?$/)
+  if (bracketMatch) return bracketMatch[1] ?? ''
+  if ((raw.match(/:/g) || []).length > 1) return raw
+  return raw.split(':')[0] ?? ''
+}
 
 function getProcessEnv(): Record<string, string | undefined> | undefined {
   try {
     return (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
   } catch {
     return undefined
+  }
+}
+
+function isProduction(): boolean {
+  try {
+    const env = getProcessEnv()
+    return env?.NODE_ENV === 'production'
+  } catch {
+    // Browser or sandboxed environment
+    return false
   }
 }
 
@@ -43,12 +62,13 @@ function siteAdminHosts(): string[] {
 }
 
 export function isAdminConsoleHost(hostname: string | null | undefined) {
-  const host = String(hostname ?? '')
-    .trim()
-    .toLowerCase()
-    .split(':')[0]
+  const host = normalizeHost(hostname)
   if (!host) return false
-  if (DEFAULT_ADMIN_HOSTS.has(host)) return true
+  if (DEFAULT_LOCAL_ADMIN_HOSTS.has(host)) {
+    // Disallow loopback / localhost in production to prevent Host header spoofing bypass
+    if (isProduction()) return false
+    return true
+  }
   if (envAdminHosts().includes(host)) return true
   if (siteAdminHosts().includes(host)) return true
   return false
@@ -66,5 +86,5 @@ export function requestHostname(headers: {
   const raw = String(rawHost || rawForwarded || '')
     .split(',')[0]
     ?.trim()
-  return raw ? raw.split(':')[0]?.toLowerCase() ?? '' : ''
+  return normalizeHost(raw)
 }

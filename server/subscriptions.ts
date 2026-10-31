@@ -2,7 +2,7 @@ import { db, getSetting, id, nowIso, setSetting } from './db.js'
 import { formatTokenCount } from '../shared/billing.js'
 import { siteName, siteUrl } from '../shared/brand.js'
 import { debitWalletForPurchase } from './wallet.js'
-import { applyOfferCents, getActiveSubscriptionOffer } from './subscriptionOffers.js'
+import { applyOfferCents, consumeSubscriptionOffer, getActiveSubscriptionOffer } from './subscriptionOffers.js'
 import { applyCombinedSubscriptionBonus } from './promoBonus.js'
 import {
   DEFAULT_FREE_DAILY_TOKENS,
@@ -461,6 +461,14 @@ export function settleFreeTierReservation(input: {
              updated_at = ?
          WHERE id = ?`,
       ).run(reserved, actual, now, input.targetId)
+
+      try {
+        db.prepare(
+          `UPDATE user_extra_tokens
+           SET tokens_used = tokens_used + ?, updated_at = ?
+           WHERE id = ?`,
+        ).run(actual, now, input.targetId)
+      } catch {}
     } else {
       const periodKey = input.periodKey || utcPeriodKey()
       db.prepare(
@@ -473,7 +481,7 @@ export function settleFreeTierReservation(input: {
            updated_at = excluded.updated_at`,
       ).run(input.userId, periodKey, actual, now, reserved, actual)
     }
-  })()
+  }).immediate()
 }
 
 export function releaseFreeTierReservation(input: {
@@ -523,6 +531,14 @@ export function consumeFreeTierTokens(userId: string, tokens: number) {
          SET tokens_used = tokens_used + ?, updated_at = ?
          WHERE id = ?`,
       ).run(amount, now, rawRow.id)
+
+      try {
+        db.prepare(
+          `UPDATE user_extra_tokens
+           SET tokens_used = tokens_used + ?, updated_at = ?
+           WHERE id = ?`,
+        ).run(amount, now, rawRow.id)
+      } catch {}
       return
     }
 
@@ -533,7 +549,7 @@ export function consumeFreeTierTokens(userId: string, tokens: number) {
        ON CONFLICT(user_id, period_key)
        DO UPDATE SET tokens_used = tokens_used + excluded.tokens_used, updated_at = excluded.updated_at`,
     ).run(userId, periodKey, amount, now)
-  })()
+  }).immediate()
 }
 
 export function resetFreeTierDailyUsage(userId: string, periodKey = utcPeriodKey()) {
@@ -614,8 +630,8 @@ export function activateSubscription(input: ActivateSubscriptionInput) {
     if (existing) {
       const base = Math.max(Date.parse(existing.expires_at) || Date.now(), Date.now())
       const expiresAt = new Date(base + durationMs).toISOString()
-      const unlimited = normalizeKind(existing.kind) === 'unlimited'
-      const tokenLimit = unlimited ? 0 : Math.max(0, existing.token_limit) + tokenLimitForGrant
+      const nextKind = kind === 'unlimited' ? 'unlimited' : normalizeKind(existing.kind) === 'unlimited' ? 'unlimited' : 'custom'
+      const nextLimit = nextKind === 'unlimited' ? 0 : Math.max(0, existing.token_limit) + tokenLimitForGrant
 
       db.prepare(
         `UPDATE user_subscriptions
@@ -628,8 +644,8 @@ export function activateSubscription(input: ActivateSubscriptionInput) {
       ).run(
         planKey,
         planLabel,
-        unlimited ? 'unlimited' : 'custom',
-        tokenLimit,
+        nextKind,
+        nextLimit,
         expiresAt,
         Math.max(0, Math.floor(input.priceCents ?? plan?.priceCents ?? 0)),
         input.sourceRef ?? null,
@@ -644,7 +660,7 @@ export function activateSubscription(input: ActivateSubscriptionInput) {
          WHERE id = ?`,
       ).run(
         planLabel,
-        tokenLimit,
+        nextLimit,
         Math.max(0, Math.floor(input.priceCents ?? plan?.priceCents ?? 0)),
         input.sourceRef ?? null,
         now,
@@ -698,7 +714,7 @@ export function activateSubscription(input: ActivateSubscriptionInput) {
 
     const row = db.prepare(`SELECT * FROM user_subscriptions WHERE id = ?`).get(subscriptionId) as SubscriptionRow
     return { extended: false as const, subscription: toActiveExtraTokensPack(row) }
-  })()
+  }).immediate()
 }
 
 
@@ -745,7 +761,7 @@ export function purchaseSubscriptionWithBalance(input: {
       sourceRef,
       note: `Subscription ${plan.label} · paid from balance`,
     })
-    return activateSubscription({
+    const res = activateSubscription({
       userId: input.userId,
       planKey: plan.key,
       planLabel: plan.label,
@@ -756,7 +772,11 @@ export function purchaseSubscriptionWithBalance(input: {
       grantedKind: plan.kind,
       grantedTokenLimit: plan.tokenLimit,
     })
-  })()
+    if (offer) {
+      consumeSubscriptionOffer(input.userId)
+    }
+    return res
+  }).immediate()
 
   return {
     credited: true as const,

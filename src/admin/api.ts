@@ -17,11 +17,6 @@ import type { UpstreamProvider } from '../../shared/providers'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
-  // Optional local-only developer access token; release ignores this header.
-  if (typeof window !== 'undefined' && window.location.hostname.startsWith('dev-admin.')) {
-    const token = window.localStorage.getItem('dev_admin_access_token')?.trim()
-    if (token) headers.set('X-Admin-Access-Token', token)
-  }
   if (init?.body && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
@@ -39,6 +34,7 @@ export type AdminLoginResponse = { user: AdminUser; expiresAt: string }
 
 export const adminApi = {
   me: () => request<{ user: AdminUser; expiresAt: string }>('/api/auth/me'),
+  logout: () => request<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
   statistics: (opts?: { q?: string; period?: string; from?: string; to?: string } | string) => {
     const params = new URLSearchParams()
     if (typeof opts === 'string') {

@@ -2,6 +2,7 @@ import { db, getSetting, id, nowIso, setSetting, tableExists } from './db.js'
 import { levelSourceRef, recordLevelSpend } from './accountLevels.js'
 import { tryGrantReferralReward } from './referrals.js'
 import { getSiteLinks } from './siteLinks.js'
+import { claimPaymentSignatureOrThrow } from './paymentSignatures.js'
 import {
   DEFAULT_RPM_CATALOG,
   MAX_RPM,
@@ -441,8 +442,19 @@ export function creditRpmCryptoOrder(orderId: string, npPaymentId?: string | nul
 
   const now = nowIso()
   const credited = db.transaction(() => {
-    const fresh = db.prepare(`SELECT credited_at FROM rpm_payments WHERE id = ?`).get(payment.id) as { credited_at: string | null }
-    if (fresh.credited_at) return false
+    const fresh = db.prepare(`SELECT credited_at, payment_id FROM rpm_payments WHERE id = ?`).get(payment.id) as { credited_at: string | null; payment_id: string | null } | undefined
+    if (!fresh || fresh.credited_at) return false
+
+    const signature = (npPaymentId ?? fresh.payment_id ?? '').trim()
+    if (signature) {
+      claimPaymentSignatureOrThrow({
+        signature,
+        flow: 'rpm',
+        paymentId: payment.id,
+        userId: payment.user_id,
+      })
+    }
+
     activatePurchasedPlan(payment.user_id, planKey)
     db.prepare(
       `UPDATE rpm_payments
@@ -450,7 +462,7 @@ export function creditRpmCryptoOrder(orderId: string, npPaymentId?: string | nul
        WHERE id = ?`,
     ).run(npPaymentId ?? null, now, now, payment.id)
     return true
-  })()
+  }).immediate()
 
   if (credited) {
     try {

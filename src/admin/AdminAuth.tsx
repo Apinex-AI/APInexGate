@@ -1,9 +1,25 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { PasswordField } from '../components/PasswordField'
 import { adminApi } from './api'
 import type { AdminUser } from './types'
 import { BrandName } from '../components/BrandName'
 import './AdminAuth.css'
+
+type AdminAuthContextType = {
+  user: AdminUser | null
+  setUser: (user: AdminUser | null) => void
+  resetAdminAuth: () => void
+}
+
+export const AdminAuthContext = createContext<AdminAuthContextType>({
+  user: null,
+  setUser: () => {},
+  resetAdminAuth: () => {},
+})
+
+export function useAdminAuth() {
+  return useContext(AdminAuthContext)
+}
 
 type AdminAuthProps = {
   children: (user: AdminUser) => ReactNode
@@ -24,15 +40,6 @@ export function AdminAuth({ children }: AdminAuthProps) {
       .finally(() => setLoading(false))
   }, [])
 
-  useEffect(() => {
-    if (user || !window.location.hostname.startsWith('dev-admin.')) return
-    const token = new URLSearchParams(window.location.search).get('access_token')?.trim()
-    if (!token) return
-    window.localStorage.setItem('dev_admin_access_token', token)
-    window.history.replaceState({}, '', window.location.pathname)
-    adminApi.me().then((data) => setUser(data.user)).catch(() => undefined)
-  }, [user])
-
   async function login(event: FormEvent) {
     event.preventDefault()
     setSubmitting(true)
@@ -46,6 +53,10 @@ export function AdminAuth({ children }: AdminAuthProps) {
     } finally {
       setSubmitting(false)
     }
+  }
+
+  const resetAdminAuth = () => {
+    setUser(null)
   }
 
   if (loading) {
@@ -91,5 +102,9 @@ export function AdminAuth({ children }: AdminAuthProps) {
     )
   }
 
-  return <>{children(user)}</>
+  return (
+    <AdminAuthContext.Provider value={{ user, setUser, resetAdminAuth }}>
+      {children(user)}
+    </AdminAuthContext.Provider>
+  )
 }

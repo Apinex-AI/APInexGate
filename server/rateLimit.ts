@@ -1,4 +1,37 @@
-import type { FastifyReply } from 'fastify'
+import type { FastifyReply, FastifyRequest } from 'fastify'
+
+/** Extract client IP reliably from request headers or socket. */
+export function clientIp(request?: FastifyRequest | any): string {
+  if (!request) return 'unknown'
+  const req = request.request ? request.request : request
+  const headers = req.headers
+  if (headers) {
+    const cf = headers['cf-connecting-ip']
+    const cfIp = Array.isArray(cf) ? cf[0] : cf
+    if (typeof cfIp === 'string' && cfIp.trim()) return cfIp.trim()
+
+    const xReal = headers['x-real-ip']
+    const xRealIp = Array.isArray(xReal) ? xReal[0] : xReal
+    if (typeof xRealIp === 'string' && xRealIp.trim()) return xRealIp.trim()
+
+    const forwarded = headers['x-forwarded-for']
+    const forwardedIp = Array.isArray(forwarded) ? forwarded[0] : forwarded
+    if (typeof forwardedIp === 'string' && forwardedIp.trim()) {
+      const first = forwardedIp.split(',')[0]?.trim()
+      if (first) return first
+    }
+  }
+  if (typeof req.ip === 'string' && req.ip.trim()) {
+    return req.ip.trim()
+  }
+  if (req.socket?.remoteAddress && typeof req.socket.remoteAddress === 'string') {
+    return req.socket.remoteAddress.trim()
+  }
+  if (req.raw?.socket?.remoteAddress && typeof req.raw.socket.remoteAddress === 'string') {
+    return req.raw.socket.remoteAddress.trim()
+  }
+  return 'unknown'
+}
 
 type Bucket = {
   count: number
@@ -76,7 +109,14 @@ export function enforceRateLimit(
   windowMs: number,
   message = 'Too many requests. Try again later.',
 ): boolean {
-  const result = consumeRateLimit(key, limit, windowMs)
+  let rateKey = key
+  const ip = clientIp((reply as any)?.request ?? reply)
+  // Associate with client IP if the key is not already scoped (prevents global DoS)
+  if (!rateKey.includes(':') && ip) {
+    rateKey = `${rateKey}:${ip}`
+  }
+
+  const result = consumeRateLimit(rateKey, limit, windowMs)
   if (result.ok) {
     setRateLimitHeaders(reply, {
       limit,
@@ -96,8 +136,26 @@ export function enforceRateLimit(
   return false
 }
 
-export function rateLimitKey(parts: Array<string | null | undefined>) {
-  return parts.map((part) => (part && part.trim() ? part.trim() : 'unknown')).join(':')
+export function rateLimitKey(
+  parts: Array<string | null | undefined | any>,
+  requestOrIp?: string | any,
+) {
+  const resolved: Array<string | null | undefined> = []
+  for (const part of parts) {
+    if (part && typeof part === 'object' && ('headers' in part || 'ip' in part || 'raw' in part || 'request' in part)) {
+      resolved.push(clientIp(part))
+    } else {
+      resolved.push(part as string | null | undefined)
+    }
+  }
+  if (requestOrIp !== undefined && requestOrIp !== null) {
+    if (typeof requestOrIp === 'string') {
+      resolved.push(requestOrIp)
+    } else {
+      resolved.push(clientIp(requestOrIp))
+    }
+  }
+  return resolved.map((part) => (part && String(part).trim() ? String(part).trim() : 'unknown')).join(':')
 }
 
 /** Presets — short windows (≤90s). Tighter counts, quick unlock. */

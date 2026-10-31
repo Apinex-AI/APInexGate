@@ -6,6 +6,7 @@ import {
 } from '../shared/providers.js'
 import { isFreeWeight } from '../shared/billing.js'
 import { proxiedFetch } from './providerProxy.js'
+import { assertSafeUpstreamUrl } from './upstreamFallback.js'
 import {
   displayNameFromId,
   isValidModelId,
@@ -268,6 +269,76 @@ export function providerBalanceTotals(provider?: UpstreamProvider) {
   return { keyCount, balanceTokens, balanceUsdCents, byProvider }
 }
 
+export async function proxiedFetchSafeRedirect(
+  url: string,
+  init: RequestInit,
+  proxyIndex: number | null,
+  secret?: string,
+): Promise<Response> {
+  let currentUrl = url
+  let headers = new Headers(init.headers)
+  let method = init.method || 'GET'
+  let body = init.body
+  let redirectCount = 0
+
+  while (true) {
+    assertSafeUpstreamUrl(currentUrl)
+    const res = await proxiedFetch(
+      currentUrl,
+      {
+        ...init,
+        method,
+        body,
+        headers,
+        redirect: 'manual',
+      },
+      proxyIndex,
+    )
+
+    if (![301, 302, 303, 307, 308].includes(res.status)) {
+      return res
+    }
+
+    redirectCount++
+    if (redirectCount > 5) {
+      throw new Error('Too many redirects')
+    }
+
+    const location = res.headers.get('location')
+    if (!location) {
+      return res
+    }
+
+    const nextUrl = new URL(location, currentUrl).toString()
+    assertSafeUpstreamUrl(nextUrl)
+
+    const prevOrigin = new URL(currentUrl).origin
+    const nextOrigin = new URL(nextUrl).origin
+
+    const nextHeaders = new Headers(headers)
+    if (prevOrigin !== nextOrigin) {
+      nextHeaders.delete('Authorization')
+      nextHeaders.delete('x-api-key')
+      nextHeaders.delete('api-key')
+      nextHeaders.delete('cookie')
+      nextHeaders.delete('proxy-authorization')
+    } else if (secret && !nextHeaders.has('Authorization')) {
+      nextHeaders.set('Authorization', `Bearer ${secret}`)
+    }
+
+    if (
+      res.status === 303 ||
+      ((res.status === 301 || res.status === 302) && method !== 'GET' && method !== 'HEAD')
+    ) {
+      method = 'GET'
+      body = undefined
+    }
+
+    headers = nextHeaders
+    currentUrl = nextUrl
+  }
+}
+
 export async function fetchApinexBalanceAndSubscription(secret: string, proxyIndex: number | null = null) {
   let balanceUsd: number | null = null
   let balanceUsdCents: number | null = null
@@ -290,7 +361,7 @@ export async function fetchApinexBalanceAndSubscription(secret: string, proxyInd
   let lastError: string | null = null
 
   try {
-    const balRes = await proxiedFetch(
+    const balRes = await proxiedFetchSafeRedirect(
       `${APINEX_BASE_URL}/balance`,
       {
         method: 'GET',
@@ -299,9 +370,11 @@ export async function fetchApinexBalanceAndSubscription(secret: string, proxyInd
           Accept: 'application/json',
           src: 'gate',
         },
+        redirect: 'manual',
         signal: AbortSignal.timeout(10_000),
       },
       proxyIndex,
+      secret,
     )
 
     const balData = (await balRes.json().catch(() => ({}))) as {
@@ -336,7 +409,7 @@ export async function fetchApinexBalanceAndSubscription(secret: string, proxyInd
   }
 
   try {
-    const subRes = await proxiedFetch(
+    const subRes = await proxiedFetchSafeRedirect(
       `${APINEX_BASE_URL}/subscription`,
       {
         method: 'GET',
@@ -345,9 +418,11 @@ export async function fetchApinexBalanceAndSubscription(secret: string, proxyInd
           Accept: 'application/json',
           src: 'gate',
         },
+        redirect: 'manual',
         signal: AbortSignal.timeout(10_000),
       },
       proxyIndex,
+      secret,
     )
 
     const subData = (await subRes.json().catch(() => ({}))) as {
@@ -702,10 +777,11 @@ export const APINEX_CATALOG_DEFAULTS: Record<string, ApinexCatalogSpec> = {
 async function fetchApinexPublicMetadata(proxyIndex: number | null = null): Promise<Map<string, ApinexCatalogSpec>> {
   const map = new Map<string, ApinexCatalogSpec>(Object.entries(APINEX_CATALOG_DEFAULTS))
   try {
-    const res = await proxiedFetch(
+    const res = await proxiedFetchSafeRedirect(
       APINEX_PUBLIC_MODELS_URL,
       {
         headers: { Accept: 'application/json', 'Cache-Control': 'no-cache', src: 'gate' },
+        redirect: 'manual',
         signal: AbortSignal.timeout(10_000),
       },
       proxyIndex,
@@ -797,7 +873,7 @@ export async function fetchCatalogModels(
     try {
       const [publicMeta, response] = await Promise.all([
         fetchApinexPublicMetadata(key.proxy_index ?? null),
-        proxiedFetch(
+        proxiedFetchSafeRedirect(
           `${APINEX_BASE_URL}/models`,
           {
             headers: {
@@ -806,9 +882,11 @@ export async function fetchCatalogModels(
               'Cache-Control': 'no-cache',
               src: 'gate',
             },
+            redirect: 'manual',
             signal: AbortSignal.timeout(10_000),
           },
           key.proxy_index ?? null,
+          key.secret,
         ),
       ])
       const payload = (await response.json().catch(() => ({}))) as {

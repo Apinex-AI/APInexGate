@@ -160,7 +160,7 @@ function generateApiKeySecret() {
   return { secret, prefix, secretHash: hashApiKey(secret) }
 }
 
-function publicApiKey(row: {
+export function publicApiKey(row: {
   id: string
   name: string
   prefix: string
@@ -176,7 +176,7 @@ function publicApiKey(row: {
     name: row.name,
     prefix: row.prefix,
     // Customer convenience: dashboard can copy the full key after creation.
-    secret: row.secret ?? null,
+    secret: null,
     spendLimitTokens: row.spend_limit_tokens,
     spentTokens: row.spent_tokens ?? 0,
     status: row.status,
@@ -382,11 +382,11 @@ export async function registerRoutes(app: FastifyInstance) {
   app.get('/api/health', async () => ({ ok: true, service: 'api', ts: nowIso() }))
 
   /** Public model uptime from customer traffic. No synthetic probes. */
-  app.get('/api/public/status', async (_request, reply) => {
+  app.get('/api/public/status', async (request, reply) => {
     if (
       !enforceRateLimit(
         reply,
-        rateLimitKey(['public-status']),
+        rateLimitKey(['public-status', request.ip]),
         RL.publicStatusIp.limit,
         RL.publicStatusIp.windowMs,
         'Too many status checks. Slow down.',
@@ -508,7 +508,7 @@ export async function registerRoutes(app: FastifyInstance) {
     if (
       !enforceRateLimit(
         reply,
-        rateLimitKey(['install']),
+        rateLimitKey(['install', request.ip]),
         RL.installIp.limit,
         RL.installIp.windowMs,
         'Too many install script requests',
@@ -538,7 +538,7 @@ export async function registerRoutes(app: FastifyInstance) {
     if (
       !enforceRateLimit(
         reply,
-        rateLimitKey(['admin-login']),
+        rateLimitKey(['admin-login', request.ip]),
         RL.adminLoginIp.limit,
         RL.adminLoginIp.windowMs,
         'Too many login attempts. Try again later.',
@@ -584,7 +584,7 @@ export async function registerRoutes(app: FastifyInstance) {
     if (
       !enforceRateLimit(
         reply,
-        rateLimitKey(['admin-logout']),
+        rateLimitKey(['admin-logout', request.ip]),
         RL.logoutIp.limit,
         RL.logoutIp.windowMs,
         'Too many logout requests. Try again shortly.',
@@ -610,11 +610,11 @@ export async function registerRoutes(app: FastifyInstance) {
     return { user: { id: user.id, email: user.email, role: user.role }, expiresAt: user.expiresAt }
   })
 
-  app.get('/api/user/auth/challenge', async (_request, reply) => {
+  app.get('/api/user/auth/challenge', async (request, reply) => {
     if (
       !enforceRateLimit(
         reply,
-        rateLimitKey(['auth-challenge']),
+        rateLimitKey(['auth-challenge', request.ip]),
         RL.challengeIp.limit,
         RL.challengeIp.windowMs,
       )
@@ -629,7 +629,7 @@ export async function registerRoutes(app: FastifyInstance) {
     }
   })
 
-  app.get('/api/user/auth/google', async (_request, reply) => {
+  app.get('/api/user/auth/google', async (request, reply) => {
     if (!googleConfigured()) {
       return reply.code(503).send({ error: 'Google sign-in is not configured' })
     }
@@ -637,7 +637,7 @@ export async function registerRoutes(app: FastifyInstance) {
     if (
       !enforceRateLimit(
         reply,
-        rateLimitKey(['google-start']),
+        rateLimitKey(['google-start', request.ip]),
         RL.googleStartIp.limit,
         RL.googleStartIp.windowMs,
         'Too many Google sign-in attempts. Try again later.',
@@ -778,22 +778,38 @@ export async function registerRoutes(app: FastifyInstance) {
         return fail(ALLOWED_EMAIL_DOMAINS_HINT)
       }
       const userId = id('user')
-      const displayId = nextUserDisplayId()
-      db.prepare(`
-        INSERT INTO users
-          (id, name, email, plan, status, balance_cents, balance_tokens, requests, created_at, last_seen_at,
-           password_hash, email_verified_at, google_sub, display_id, auth_method)
-        VALUES (?, ?, ?, 'default', 'active', 0, 0, 0, ?, ?, NULL, ?, ?, ?, 'email')
-      `).run(
-        userId,
-        profile.name,
-        profile.email,
-        now,
-        now,
-        now,
-        profile.sub,
-        displayId,
-      )
+      let displayId = nextUserDisplayId()
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          db.prepare(`
+            INSERT INTO users
+              (id, name, email, plan, status, balance_cents, balance_tokens, requests, created_at, last_seen_at,
+               password_hash, email_verified_at, google_sub, display_id, auth_method)
+            VALUES (?, ?, ?, 'default', 'active', 0, 0, 0, ?, ?, NULL, ?, ?, ?, 'email')
+          `).run(
+            userId,
+            profile.name,
+            profile.email,
+            now,
+            now,
+            now,
+            profile.sub,
+            displayId,
+          )
+          break
+        } catch (err: any) {
+          if (
+            attempt < 4 &&
+            (err?.code === 'SQLITE_CONSTRAINT_UNIQUE' ||
+              err?.code === 'SQLITE_CONSTRAINT' ||
+              String(err?.message).includes('display_id'))
+          ) {
+            displayId = Math.max(nextUserDisplayId(), displayId + 1)
+            continue
+          }
+          throw err
+        }
+      }
       user = {
         id: userId,
         email: profile.email,
@@ -818,7 +834,7 @@ export async function registerRoutes(app: FastifyInstance) {
     if (
       !enforceRateLimit(
         reply,
-        rateLimitKey(['user-logout']),
+        rateLimitKey(['user-logout', request.ip]),
         RL.logoutIp.limit,
         RL.logoutIp.windowMs,
         'Too many logout requests. Try again shortly.',
@@ -1094,7 +1110,7 @@ export async function registerRoutes(app: FastifyInstance) {
     if (!user) return
     const rows = db
       .prepare(
-        `SELECT id, name, prefix, secret, spend_limit_tokens, spent_tokens, status, created_at, last_used_at
+        `SELECT id, name, prefix, spend_limit_tokens, spent_tokens, status, created_at, last_used_at
          FROM api_keys
          WHERE user_id = ? AND status = 'active' AND name != '__playground'
          ORDER BY datetime(created_at) DESC`,
@@ -1103,7 +1119,6 @@ export async function registerRoutes(app: FastifyInstance) {
       id: string
       name: string
       prefix: string
-      secret: string | null
       spend_limit_tokens: number | null
       spent_tokens: number
       status: string
@@ -1141,8 +1156,8 @@ export async function registerRoutes(app: FastifyInstance) {
     db.prepare(
       `INSERT INTO api_keys
         (id, user_id, name, prefix, secret_hash, secret, spend_limit_tokens, spent_tokens, status, created_at, last_used_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'active', ?, NULL)`,
-    ).run(keyId, user.id, name, prefix, secretHash, secret, spendLimitTokens, createdAt)
+       VALUES (?, ?, ?, ?, ?, NULL, ?, 0, 'active', ?, NULL)`,
+    ).run(keyId, user.id, name, prefix, secretHash, spendLimitTokens, createdAt)
 
     logUserActivity({
       action: 'api_key.created',
@@ -1156,7 +1171,6 @@ export async function registerRoutes(app: FastifyInstance) {
         id: keyId,
         name,
         prefix,
-        secret,
         spend_limit_tokens: spendLimitTokens,
         spent_tokens: 0,
         status: 'active',
@@ -1953,14 +1967,30 @@ export async function registerRoutes(app: FastifyInstance) {
     const userId = id('user')
     const createdAt = nowIso()
     const name = email.split('@')[0] || 'User'
-    const displayId = nextUserDisplayId()
     const tokens = Number.isFinite(balanceTokens) && balanceTokens > 0 ? balanceTokens : 0
-    db.prepare(`
-      INSERT INTO users
-        (id, name, email, plan, status, balance_cents, balance_tokens, requests, created_at, last_seen_at,
-         password_hash, email_verified_at, display_id)
-      VALUES (?, ?, ?, 'default', 'active', 0, ?, 0, ?, NULL, NULL, ?, ?)
-    `).run(userId, name, email, tokens, createdAt, createdAt, displayId)
+    let displayId = nextUserDisplayId()
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        db.prepare(`
+          INSERT INTO users
+            (id, name, email, plan, status, balance_cents, balance_tokens, requests, created_at, last_seen_at,
+             password_hash, email_verified_at, display_id)
+          VALUES (?, ?, ?, 'default', 'active', 0, ?, 0, ?, NULL, NULL, ?, ?)
+        `).run(userId, name, email, tokens, createdAt, createdAt, displayId)
+        break
+      } catch (err: any) {
+        if (
+          attempt < 4 &&
+          (err?.code === 'SQLITE_CONSTRAINT_UNIQUE' ||
+            err?.code === 'SQLITE_CONSTRAINT' ||
+            String(err?.message).includes('display_id'))
+        ) {
+          displayId = Math.max(nextUserDisplayId(), displayId + 1)
+          continue
+        }
+        throw err
+      }
+    }
     if (tokens > 0) {
       db.prepare(`
         INSERT INTO balance_transactions
@@ -3332,7 +3362,8 @@ export async function registerRoutes(app: FastifyInstance) {
   app.get('/api/admin/api-keys', async (request, reply) => {
     if (!requireAuth(request, reply)) return
     return { keys: db.prepare(`
-      SELECT k.*, u.name, u.email FROM api_keys k JOIN users u ON u.id = k.user_id
+      SELECT k.id, k.user_id, k.name, k.prefix, k.spend_limit_tokens, k.spent_tokens, k.status, k.created_at, k.last_used_at, u.name, u.email
+      FROM api_keys k JOIN users u ON u.id = k.user_id
       WHERE k.status != 'revoked'
       ORDER BY datetime(k.created_at) DESC
     `).all() }

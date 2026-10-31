@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { userApi, type CustomerApiKey } from '../auth/userApi'
 import { ProviderIcon } from './ProviderIcon'
 import { apiBase } from '../lib/brand'
 import '../pages/Landing.css'
@@ -173,7 +172,6 @@ function isDecisionPreviewModel(model: ChatModel) {
 }
 
 function ChatBody({ model, onCopy }: { model: ChatModel; onCopy: (text: string) => void }) {
-  const [apiKey, setApiKey] = useState<string | null>(null)
   const [lang, setLang] = useState<CodeLang>('curl')
   const [copiedCode, setCopiedCode] = useState(false)
   const [statusModel, setStatusModel] = useState<StatusModel | null>(() => findStatusModel(statusModelsCache, model))
@@ -181,15 +179,6 @@ function ChatBody({ model, onCopy }: { model: ChatModel; onCopy: (text: string) 
 
   useEffect(() => {
     let cancelled = false
-    userApi
-      .keys()
-      .then((data) => {
-        if (cancelled) return
-        setApiKey(pickKey(data.keys))
-      })
-      .catch(() => {
-        if (!cancelled) setApiKey(null)
-      })
 
     void fetchStatusModelsCached().then((models) => {
       if (cancelled || !models) return
@@ -202,9 +191,9 @@ function ChatBody({ model, onCopy }: { model: ChatModel; onCopy: (text: string) 
   }, [model])
 
   function getCodeText() {
-    if (lang === 'python') return pythonSnippet(model.id, apiKey, isDecision)
-    if (lang === 'node') return nodeSnippet(model.id, apiKey, isDecision)
-    return curlText(model.id, apiKey, isDecision)
+    if (lang === 'python') return pythonSnippet(model.id, isDecision)
+    if (lang === 'node') return nodeSnippet(model.id, isDecision)
+    return curlText(model.id, isDecision)
   }
 
   return (
@@ -349,8 +338,8 @@ function ChatBody({ model, onCopy }: { model: ChatModel; onCopy: (text: string) 
   )
 }
 
-function pythonSnippet(modelId: string, apiKey: string | null, isDecision = false) {
-  const token = apiKey?.trim() || '$API_KEY'
+function pythonSnippet(modelId: string, isDecision = false) {
+  const token = '$APINEX_API_KEY'
   if (isDecision) {
     return `import requests
 
@@ -384,8 +373,8 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)`
 }
 
-function nodeSnippet(modelId: string, apiKey: string | null, isDecision = false) {
-  const token = apiKey?.trim() || '$API_KEY'
+function nodeSnippet(modelId: string, isDecision = false) {
+  const token = '$APINEX_API_KEY'
   if (isDecision) {
     return `const response = await fetch("${apiBase()}/decisions", {
   method: "POST",
@@ -423,19 +412,8 @@ const response = await client.chat.completions.create({
 console.log(response.choices[0].message.content);`
 }
 
-function pickKey(keys: CustomerApiKey[]) {
-  const usable = keys.filter((key) => key.status === 'active' && Boolean(key.secret?.trim()))
-  if (usable.length === 0) return null
-  return usable.slice().sort((a, b) => {
-    const aUsed = a.lastUsedAt ? Date.parse(a.lastUsedAt) : 0
-    const bUsed = b.lastUsedAt ? Date.parse(b.lastUsedAt) : 0
-    if (aUsed !== bUsed) return bUsed - aUsed
-    return Date.parse(b.createdAt) - Date.parse(a.createdAt)
-  })[0].secret
-}
-
-function curlText(modelId: string, apiKey: string | null, isDecision = false) {
-  const token = apiKey?.trim() || '$API_KEY'
+function curlText(modelId: string, isDecision = false) {
+  const token = '$APINEX_API_KEY'
   if (isDecision) {
     return [
       `curl ${apiBase()}/decisions \\`,

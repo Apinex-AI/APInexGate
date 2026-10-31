@@ -4,7 +4,7 @@ import { Modal } from '../components/Modal'
 import { useToast } from '../components/Toast'
 import { SpendChart } from '../components/SpendChart'
 import { useCustomer } from '../auth/CustomerContext'
-import { userApi, type CustomerApiKey, type CustomerStats } from '../auth/userApi'
+import { userApi, type CustomerStats } from '../auth/userApi'
 import { formatFullTokenCount, formatTokenCount, formatUsdBalance, formatUsdExact, formatUsdFromTokens } from '../../shared/billing'
 import { apiBase, siteName } from '../lib/brand'
 import './Dashboard.css'
@@ -19,7 +19,6 @@ export function Dashboard() {
   const location = useLocation()
   const [stats, setStats] = useState<CustomerStats | null>(null)
   const [lang, setLang] = useState<SnippetLang>('curl')
-  const [apiKey, setApiKey] = useState<string | null>(null)
   const [recentVisible, setRecentVisible] = useState(RECENT_PAGE)
   const [copiedBaseUrl, setCopiedBaseUrl] = useState(false)
   const [copiedSnippet, setCopiedSnippet] = useState(false)
@@ -47,12 +46,6 @@ export function Dashboard() {
       })
       .catch(() => undefined)
     void loadRewards()
-    userApi
-      .keys()
-      .then((data) => {
-        if (!cancelled) setApiKey(pickDashboardKey(data.keys))
-      })
-      .catch(() => undefined)
     return () => {
       cancelled = true
     }
@@ -415,7 +408,7 @@ export function Dashboard() {
                 className="ov-terminal-copy-btn"
                 type="button"
                 onClick={() => {
-                  void navigator.clipboard?.writeText(quickStartSnippet(lang, apiKey))
+                  void navigator.clipboard?.writeText(quickStartSnippet(lang))
                   toast('Snippet copied')
                   setCopiedSnippet(true)
                   setTimeout(() => setCopiedSnippet(false), 1800)
@@ -465,7 +458,7 @@ export function Dashboard() {
                 <span className="ov-codebox-model">{QUICK_START_MODEL}</span>
               </div>
               <pre className="ov-codebox-pre">
-                <code>{quickStartSnippet(lang, null)}</code>
+                <code>{quickStartSnippet(lang)}</code>
               </pre>
             </div>
           </section>
@@ -654,21 +647,10 @@ function formatRelative(value: string) {
 const SNIPPET_LANGS: SnippetLang[] = ['curl', 'Python', 'JavaScript', 'TypeScript']
 
 const QUICK_START_MODEL = 'free/glm-5.3-flash'
-const QUICK_START_KEY_MASK = 'sk-…'
+const QUICK_START_KEY_PLACEHOLDER = '$APINEX_API_KEY'
 
-function pickDashboardKey(keys: CustomerApiKey[]) {
-  const usable = keys.filter((key) => key.status === 'active' && Boolean(key.secret?.trim()))
-  if (usable.length === 0) return null
-  return usable.slice().sort((a, b) => {
-    const aUsed = a.lastUsedAt ? Date.parse(a.lastUsedAt) : 0
-    const bUsed = b.lastUsedAt ? Date.parse(b.lastUsedAt) : 0
-    if (aUsed !== bUsed) return bUsed - aUsed
-    return Date.parse(b.createdAt) - Date.parse(a.createdAt)
-  })[0].secret
-}
-
-function quickStartSnippet(lang: SnippetLang, apiKey: string | null) {
-  const token = apiKey?.trim() || QUICK_START_KEY_MASK
+function quickStartSnippet(lang: SnippetLang) {
+  const token = QUICK_START_KEY_PLACEHOLDER
   const snippets: Record<SnippetLang, string> = {
     curl: `curl ${apiBase()}/chat/completions \\
   -H "Authorization: Bearer ${token}" \\

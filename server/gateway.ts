@@ -765,7 +765,7 @@ export function buildUpstreamRequestHeaders(
   return headers
 }
 
-async function upstreamPost(
+export async function upstreamPost(
   baseUrl: string,
   path: 'chat/completions' | 'responses' | 'decisions',
   providerSecret: string,
@@ -805,6 +805,7 @@ async function upstreamPost(
       body: JSON.stringify(payload),
       signal: controller.signal,
       dispatcher,
+      redirect: 'manual',
     })
   } finally {
     clearTimeout(timeout)
@@ -2009,17 +2010,31 @@ async function proxyModelRequest(input: {
   }
 
   let reservationSettled = false
+  let slotAcquired = false
   try {
     // Fairness dispatch: when the queue is active (upstream saturation),
     // subscribers and paid requests skip ahead of free users. Once the slot is granted, the request
     // owns it until completion — a queued request is never preempted.
     const accountRpm = getAccountRpm(auth.user.id)
-    const dispatch = await acquireDispatchSlot(auth.user.id, {
-      priority: accountRpm.source !== 'free' || !freeModel,
-    })
+    let dispatch: { waited: boolean; timedOut: boolean }
+    try {
+      dispatch = await acquireDispatchSlot(auth.user.id, {
+        priority: accountRpm.source !== 'free' || !freeModel,
+        signal: clientAbortController.signal,
+      })
+    } catch (err: unknown) {
+      if (
+        (err instanceof DOMException && err.name === 'AbortError') ||
+        (err instanceof Error && err.name === 'AbortError') ||
+        clientAbortController.signal.aborted
+      ) {
+        return
+      }
+      throw err
+    }
     if (dispatch.timedOut) {
       releaseReservation(reservation.reservationId)
-      releaseDispatchSlot()
+      reservationSettled = true
       const retryAfterSec = 5
       setRateLimitHeaders(reply, { limit: 0, remaining: 0, resetAt: Date.now() + retryAfterSec * 1000, retryAfterSec })
       return sendError(
@@ -2028,6 +2043,7 @@ async function proxyModelRequest(input: {
         'rate_limit_error',
       )
     }
+    slotAcquired = true
 
     const attemptPlan = stages.flatMap((stage) =>
       stage.attempts.map((attemptTarget) => ({ ...attemptTarget, stage })),
@@ -2196,8 +2212,7 @@ async function proxyModelRequest(input: {
                 if (advanceToNextStage()) continue
               } else {
                 const firstRead = raceResult as { done: boolean; value?: Uint8Array }
-                reservationSettled = true
-                return await pipeStreamingCompletion({
+                const result = await pipeStreamingCompletion({
                   reply,
                   upstream,
                   auth,
@@ -2219,11 +2234,12 @@ async function proxyModelRequest(input: {
                   initialDone: firstRead.done,
                   existingReader: reader,
                 })
+                reservationSettled = true
+                return result
               }
             }
 
-            reservationSettled = true
-            return await pipeStreamingCompletion({
+            const result = await pipeStreamingCompletion({
               reply,
               upstream,
               auth,
@@ -2242,6 +2258,8 @@ async function proxyModelRequest(input: {
                       ? 'responses-native'
                       : 'openai',
             })
+            reservationSettled = true
+            return result
           }
 
           const data = (await upstream.json()) as Record<string, unknown>
@@ -2372,11 +2390,18 @@ async function proxyModelRequest(input: {
           : clientSafeUpstreamError(finalStatus, lastError)
       return sendError(finalStatus, publicError, 'api_error')
     } finally {
-      releaseDispatchSlot()
+      if (slotAcquired) {
+        slotAcquired = false
+        releaseDispatchSlot()
+      }
     }
   } finally {
     request.raw.off('close', onClientClose)
     reply.raw.off('close', onClientClose)
+    if (slotAcquired) {
+      slotAcquired = false
+      releaseDispatchSlot()
+    }
     if (!reservationSettled) {
       try {
         releaseReservation(reservation.reservationId)
@@ -3420,19 +3445,33 @@ async function pipeStreamingCompletion(input: {
   // SSE events must end with a blank line. A single newline only separates
   // fields within one event, so standards-compliant clients such as the AI SDK
   // will otherwise buffer the entire stream and emit no chunks.
-  const writeRewritten = (rewritten: string) => {
+  const writeRewritten = async (rewritten: string) => {
     if (!rewritten) return
+    let payload = ''
     if (responseStyle === 'openai') {
-      reply.raw.write(`${rewritten.replace(/\n+$/, '')}\n\n`)
-      return
-    }
-    if (responseStyle === 'responses-native') {
+      payload = `${rewritten.replace(/\n+$/, '')}\n\n`
+    } else if (responseStyle === 'responses-native') {
       const suffix = rewritten.trimStart().startsWith('event:') ? '\n' : '\n\n'
-      reply.raw.write(`${rewritten.replace(/\n+$/, '')}${suffix}`)
-      return
+      payload = `${rewritten.replace(/\n+$/, '')}${suffix}`
+    } else {
+      // Emulated Responses events are already `\n\n`-terminated.
+      payload = rewritten.endsWith('\n') ? rewritten : `${rewritten}\n`
     }
-    // Emulated Responses events are already `\n\n`-terminated.
-    reply.raw.write(rewritten.endsWith('\n') ? rewritten : `${rewritten}\n`)
+    const ok = reply.raw.write(payload)
+    if (!ok && !reply.raw.destroyed) {
+      await new Promise<void>((resolve) => {
+        const onDrain = () => {
+          reply.raw.off('close', onClose)
+          resolve()
+        }
+        const onClose = () => {
+          reply.raw.off('drain', onDrain)
+          resolve()
+        }
+        reply.raw.once('drain', onDrain)
+        reply.raw.once('close', onClose)
+      })
+    }
   }
 
   try {
@@ -3441,7 +3480,7 @@ async function pipeStreamingCompletion(input: {
       const lines = pending.split('\n')
       pending = lines.pop() ?? ''
       for (const line of lines) {
-        writeRewritten(rewriteOpenAiLine(line))
+        await writeRewritten(rewriteOpenAiLine(line))
       }
     }
     if (!initialDone) {
@@ -3453,12 +3492,12 @@ async function pipeStreamingCompletion(input: {
         const lines = pending.split('\n')
         pending = lines.pop() ?? ''
         for (const line of lines) {
-          writeRewritten(rewriteOpenAiLine(line))
+          await writeRewritten(rewriteOpenAiLine(line))
         }
       }
     }
     if (pending) {
-      writeRewritten(rewriteOpenAiLine(pending))
+      await writeRewritten(rewriteOpenAiLine(pending))
     }
     if (responseStyle === 'anthropic') {
       sendTextStop()

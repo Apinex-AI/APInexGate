@@ -22,6 +22,12 @@ type Waiter = {
   reject: (reason: Error) => void
   timer: ReturnType<typeof setTimeout>
   enqueuedAt: number
+  cleanup?: () => void
+}
+
+function createAbortError(reason?: unknown): Error {
+  if (reason instanceof Error) return reason
+  return new DOMException('The operation was aborted', 'AbortError')
 }
 
 const MAX_QUEUE_WAIT_MS = 15_000
@@ -44,7 +50,14 @@ function drainLocked() {
   }
 }
 
-export async function acquireDispatchSlot(userId: string, opts?: { waitTimeoutMs?: number; priority?: boolean }): Promise<{ waited: boolean; timedOut: boolean }> {
+export async function acquireDispatchSlot(
+  userId: string,
+  opts?: { waitTimeoutMs?: number; priority?: boolean; signal?: AbortSignal },
+): Promise<{ waited: boolean; timedOut: boolean }> {
+  if (opts?.signal?.aborted) {
+    throw createAbortError(opts.signal.reason)
+  }
+
   const settings = getGatewayFairnessSettings()
   if (activeSlots < MAX_CONCURRENT && queue.length === 0) {
     activeSlots += 1
@@ -55,17 +68,51 @@ export async function acquireDispatchSlot(userId: string, opts?: { waitTimeoutMs
   const priority = opts?.priority ?? (settings.subscriberPriority ? hasPaidRpm : false)
 
   return new Promise((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout>
+    let onAbort: (() => void) | undefined
+
+    const cleanup = () => {
+      if (opts?.signal && onAbort) {
+        opts.signal.removeEventListener('abort', onAbort)
+        onAbort = undefined
+      }
+    }
+
+    if (opts?.signal) {
+      if (opts.signal.aborted) {
+        return reject(createAbortError(opts.signal.reason))
+      }
+      onAbort = () => {
+        const index = queue.indexOf(waiter)
+        if (index !== -1) {
+          queue.splice(index, 1)
+        }
+        clearTimeout(timer)
+        cleanup()
+        reject(createAbortError(opts?.signal?.reason))
+      }
+      opts.signal.addEventListener('abort', onAbort, { once: true })
+    }
+
     const waiter: Waiter = {
       userId,
       priority,
-      resolve: () => resolve({ waited: true, timedOut: false }),
-      reject,
-      timer: setTimeout(() => {
+      resolve: () => {
+        cleanup()
+        resolve({ waited: true, timedOut: false })
+      },
+      reject: (reason: Error) => {
+        cleanup()
+        reject(reason)
+      },
+      cleanup,
+      timer: (timer = setTimeout(() => {
+        cleanup()
         const index = queue.indexOf(waiter)
         if (index === -1) return
         queue.splice(index, 1)
         resolve({ waited: true, timedOut: true })
-      }, opts?.waitTimeoutMs ?? MAX_QUEUE_WAIT_MS),
+      }, opts?.waitTimeoutMs ?? MAX_QUEUE_WAIT_MS)),
       enqueuedAt: Date.now(),
     }
     queue.push(waiter)
@@ -94,6 +141,7 @@ export function dispatchQueueStats() {
 export function resetDispatchQueueForTests() {
   for (const waiter of queue) {
     clearTimeout(waiter.timer)
+    waiter.cleanup?.()
     waiter.reject(new Error('queue reset'))
   }
   queue = []

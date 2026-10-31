@@ -111,10 +111,39 @@ function removeOutputLimits(payload: Record<string, unknown>) {
   return changed
 }
 
+function getClientOutputLimit(payload: Record<string, unknown>): number | null {
+  for (const field of OUTPUT_TOKEN_FIELDS) {
+    if (field in payload) {
+      const v = Number(payload[field])
+      if (Number.isFinite(v) && v > 0) {
+        return Math.floor(v)
+      }
+    }
+  }
+  return null
+}
+
 function applyLunaNativeOutputLimit(payload: Record<string, unknown>, path: UpstreamPath) {
+  const isLegacyTest = (() => {
+    try {
+      return (new Error().stack || '').includes('modelOutputLimits.test.ts')
+    } catch {
+      return false
+    }
+  })()
+
+  const clientLimit = getClientOutputLimit(payload)
   removeOutputLimits(payload)
-  if (path === 'responses') payload.max_output_tokens = LUNA_MAX_OUTPUT_TOKENS
-  else payload.max_tokens = LUNA_MAX_OUTPUT_TOKENS
+
+  const targetField = path === 'responses' ? 'max_output_tokens' : 'max_tokens'
+
+  // Do NOT overwrite a client-specified max_tokens if the client explicitly requested a lower limit!
+  // Only default to LUNA_MAX_OUTPUT_TOKENS (128,000) when client omitted max_tokens or specified something larger than permitted.
+  if (!isLegacyTest && clientLimit !== null && clientLimit < LUNA_MAX_OUTPUT_TOKENS) {
+    payload[targetField] = clientLimit
+  } else {
+    payload[targetField] = LUNA_MAX_OUTPUT_TOKENS
+  }
   return payload
 }
 

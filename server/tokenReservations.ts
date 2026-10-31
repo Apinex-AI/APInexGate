@@ -243,7 +243,7 @@ export function tryReserveTokens(input: {
     return { ok: true, reservationId, reservedTokens: 0 }
   }
 
-  const tx = db.transaction(() => {
+  return db.transaction(() => {
     const user = db
       .prepare(
         `SELECT id, balance_tokens, COALESCE(restricted_tokens, 0) AS restricted_tokens,
@@ -348,10 +348,9 @@ export function tryReserveTokens(input: {
         input.signal?.removeEventListener('abort', onAbort)
       })
     }
-    return result
-  })
 
-  return tx()
+    return result
+  }).immediate()
 }
 
 function loadReservation(reservationId: string): TokenReservationRow | null {
@@ -378,7 +377,7 @@ export function settleReservation(
   chargedTokens: number,
 ): { ok: boolean; charged: number; refunded: number } {
   const charge = Math.max(0, Math.floor(Number(chargedTokens) || 0))
-  const tx = db.transaction(() => {
+  return db.transaction(() => {
     const row = loadReservation(reservationId)
     if (!row) return { ok: false, charged: 0, refunded: 0 }
 
@@ -448,8 +447,19 @@ export function settleReservation(
     if (overage > 0) {
       // Should be rare (bad estimate). Anthropic reservations must never consume
       // restricted Telegram credits, including an unexpected usage overage.
-      if (row.restricted_credits_allowed === 0) debitRegularTokens(row.user_id, overage)
-      else debitApiTokens(row.user_id, overage)
+      const debitRes = row.restricted_credits_allowed === 0
+        ? debitRegularTokens(row.user_id, overage)
+        : debitApiTokens(row.user_id, overage)
+
+      if (!debitRes.ok) {
+        // Debit failed (insufficient balance), record the overdraft gracefully
+        db.prepare(
+          `UPDATE users
+           SET balance_tokens = balance_tokens - ?,
+               restricted_tokens = 0
+           WHERE id = ?`,
+        ).run(overage, row.user_id)
+      }
     }
 
     db.prepare(
@@ -475,13 +485,12 @@ export function settleReservation(
     }
 
     return { ok: true, charged: charge, refunded: refund }
-  })
-  return tx()
+  }).immediate()
 }
 
 /** Release a full open hold (errors / aborted upstream) — refund everything. Fully atomic and idempotent. */
 export function releaseReservation(reservationId: string): { ok: boolean; refunded: number } {
-  const tx = db.transaction(() => {
+  return db.transaction(() => {
     const row = loadReservation(reservationId)
     if (!row) return { ok: false, refunded: 0 }
 
@@ -554,8 +563,7 @@ export function releaseReservation(reservationId: string): { ok: boolean; refund
     }
 
     return { ok: true, refunded: reserved }
-  })
-  return tx()
+  }).immediate()
 }
 
 /** Aliases ensuring settleTokens and releaseTokens naming conventions work atomically and idempotently. */
@@ -578,7 +586,7 @@ export function expireOpenReservations(now = new Date()): number {
 
     let batchCount = 0
     for (const row of open) {
-      const tx = db.transaction(() => {
+      const expired = db.transaction(() => {
         const full = loadOpenReservation(row.id)
         if (!full) return false
         const reserved = Math.max(0, full.reserved_tokens)
@@ -607,8 +615,8 @@ export function expireOpenReservations(now = new Date()): number {
            WHERE id = ? AND status = 'open'`,
         ).run(updatedAt, updatedAt, row.id)
         return true
-      })
-      if (tx()) batchCount += 1
+      }).immediate()
+      if (expired) batchCount += 1
     }
     totalExpired += batchCount
     if (open.length < 200 || batchCount === 0) break

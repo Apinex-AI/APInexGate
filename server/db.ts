@@ -659,9 +659,9 @@ db.exec(`
   }
 }
 
-export function nextUserDisplayId() {
-  const row = db.prepare(`SELECT COALESCE(MAX(display_id), 0) + 1 AS n FROM users`).get() as { n: number }
-  return row.n
+export function nextUserDisplayId(): number {
+  const row = db.prepare(`SELECT COALESCE(MAX(display_id), 0) + 1 AS n FROM users`).get() as { n: number } | undefined
+  return Number(row?.n) || 1
 }
 
 db.exec(`

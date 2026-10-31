@@ -31,9 +31,9 @@ const OS_OPTIONS: Array<{ id: OsId; label: string; desc: string }> = [
   { id: 'windows', label: 'Windows', desc: 'Windows 10/11 · PowerShell & WSL' },
 ]
 
-/** Prefer recently used active keys with a recoverable secret; else newest created. */
+/** Prefer recently used active keys; else newest created. */
 function pickPreferredKey(keys: CustomerApiKey[]) {
-  const usable = keys.filter((key) => key.status === 'active' && Boolean(key.secret?.trim()))
+  const usable = keys.filter((key) => key.status === 'active')
   if (usable.length === 0) return null
   return usable.slice().sort((a, b) => {
     const aUsed = a.lastUsedAt ? Date.parse(a.lastUsedAt) : 0
@@ -112,7 +112,7 @@ export function Docs({ embedded = false }: { embedded?: boolean } = {}) {
   const defaultModel = meta?.defaultModel ?? 'free/glm-5.3-flash'
   
   const chosenKey = keys.find((k) => k.id === selectedKeyId) || pickPreferredKey(keys)
-  const fullKey = chosenKey?.secret || ''
+  const fullKey = chosenKey?.prefix ? `${chosenKey.prefix}…` : '$APINEX_API_KEY'
 
   async function handleCreateNewKey(e: React.FormEvent) {
     e.preventDefault()
@@ -120,7 +120,7 @@ export function Docs({ embedded = false }: { embedded?: boolean } = {}) {
     setCreatingKey(true)
     try {
       const data = await userApi.createKey({ name })
-      const createdKey = { ...data.key, secret: data.secret }
+      const createdKey = { ...data.key }
       setKeys((prev) => [createdKey, ...prev])
       setSelectedKeyId(createdKey.id)
       setNewKeyName('')
@@ -133,8 +133,8 @@ export function Docs({ embedded = false }: { embedded?: boolean } = {}) {
   }
 
   function copy(text: string, label = 'Copied') {
-    if (!text.trim() || text.includes('sk-…')) {
-      toast('Create or select an API key first', 'error')
+    if (!text.trim()) {
+      toast('Nothing to copy', 'error')
       return
     }
     void navigator.clipboard?.writeText(text).then(
@@ -327,7 +327,6 @@ export function Docs({ embedded = false }: { embedded?: boolean } = {}) {
                   <div className="setup-keys-grid">
                     {keys.map((k) => {
                       const isSelected = (chosenKey?.id === k.id)
-                      const hasSecret = Boolean(k.secret?.trim())
                       return (
                         <button
                           key={k.id}
@@ -352,11 +351,7 @@ export function Docs({ embedded = false }: { embedded?: boolean } = {}) {
                           </div>
 
                           <div className="setup-key-card-footer">
-                            {hasSecret ? (
-                              <span className="setup-key-badge is-ready">Secret ready</span>
-                            ) : (
-                              <span className="setup-key-badge is-masked">Secret hidden (prefix only)</span>
-                            )}
+                            <span className="setup-key-badge is-masked">Secret hidden (prefix only)</span>
                             {k.lastUsedAt ? (
                               <small className="setup-key-lastused">
                                 Active {new Date(k.lastUsedAt).toLocaleDateString()}
@@ -553,11 +548,11 @@ export function Docs({ embedded = false }: { embedded?: boolean } = {}) {
               </div>
             </div>
 
-            {!fullKey && chosenKey && (
+            {chosenKey && (
               <div className="setup-secret-notice">
                 <span>
-                  Note: <strong>{chosenKey.name}</strong> was created in a previous session, so its full secret is masked.
-                  If you haven't saved it, click Step 2 in the stepper above to generate a fresh key.
+                  Using key: <strong>{chosenKey.name}</strong> ({chosenKey.prefix ? `${chosenKey.prefix}…` : 'active'}).
+                  Replace the placeholder with your secret key when running outside this guide.
                 </span>
               </div>
             )}

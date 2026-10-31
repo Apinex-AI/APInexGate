@@ -81,14 +81,17 @@ export function debitApiTokens(userId: string, amount: number) {
       return { ok: false as const, restrictedUsed: 0, regularUsed: 0 }
     }
     const restrictedUsed = Math.min(tokens, Math.max(0, user.restricted_tokens))
-    db.prepare(
+    const result = db.prepare(
       `UPDATE users
        SET balance_tokens = balance_tokens - ?,
            restricted_tokens = MAX(0, COALESCE(restricted_tokens, 0) - ?)
        WHERE id = ? AND balance_tokens >= ?`,
     ).run(tokens, restrictedUsed, userId, tokens)
+    if (result.changes !== 1) {
+      return { ok: false as const, restrictedUsed: 0, regularUsed: 0 }
+    }
     return { ok: true as const, restrictedUsed, regularUsed: tokens - restrictedUsed }
-  })()
+  }).immediate()
 }
 
 export function debitRegularTokens(userId: string, amount: number) {

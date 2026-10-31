@@ -27,44 +27,64 @@ const app = Fastify({
       },
     },
   },
-  bodyLimit: 25 * 1024 * 1024,
+  bodyLimit: 5 * 1024 * 1024,
 })
 
 export function sanitizeJsonControlCharacters(str: string): string {
+  if (str.length > 512 * 1024) {
+    throw new SyntaxError('JSON string too large for control character sanitization')
+  }
+
+  // Fast path: if there are no raw control characters at all, return str as-is.
+  if (!/[\u0000-\u001f]/.test(str)) {
+    return str
+  }
+
+  const chunks: string[] = []
+  let lastSlice = 0
   let inString = false
   let escaped = false
-  let out = ''
-  for (let i = 0; i < str.length; i += 1) {
-    const ch = str[i]
+
+  const len = str.length
+  for (let i = 0; i < len; i += 1) {
+    const code = str.charCodeAt(i)
+
     if (inString) {
       if (escaped) {
         escaped = false
-        out += ch
-      } else if (ch === '\\') {
+      } else if (code === 0x5c /* \ */) {
         escaped = true
-        out += ch
-      } else if (ch === '"') {
+      } else if (code === 0x22 /* " */) {
         inString = false
-        out += ch
-      } else if (ch === '\n') {
-        out += '\\n'
-      } else if (ch === '\r') {
-        out += '\\r'
-      } else if (ch === '\t') {
-        out += '\\t'
-      } else if (ch.charCodeAt(0) < 0x20) {
-        out += `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`
-      } else {
-        out += ch
+      } else if (code < 0x20) {
+        if (i > lastSlice) {
+          chunks.push(str.slice(lastSlice, i))
+        }
+        if (code === 0x0a /* \n */) {
+          chunks.push('\\n')
+        } else if (code === 0x0d /* \r */) {
+          chunks.push('\\r')
+        } else if (code === 0x09 /* \t */) {
+          chunks.push('\\t')
+        } else {
+          chunks.push(`\\u${code.toString(16).padStart(4, '0')}`)
+        }
+        lastSlice = i + 1
       }
     } else {
-      if (ch === '"') {
+      if (code === 0x22 /* " */) {
         inString = true
       }
-      out += ch
     }
   }
-  return out
+
+  if (lastSlice === 0) {
+    return str
+  }
+  if (lastSlice < len) {
+    chunks.push(str.slice(lastSlice))
+  }
+  return chunks.join('')
 }
 
 app.addContentTypeParser('application/json', { parseAs: 'string' }, (request, body, done) => {
@@ -77,6 +97,10 @@ app.addContentTypeParser('application/json', { parseAs: 'string' }, (request, bo
     done(null, JSON.parse(raw))
   } catch (initialError) {
     // Lenient recovery for literal unescaped newlines/tabs pasted into curl -d.
+    if (raw.length > 512 * 1024) {
+      done(initialError as Error, undefined)
+      return
+    }
     try {
       done(null, JSON.parse(sanitizeJsonControlCharacters(raw)))
     } catch {

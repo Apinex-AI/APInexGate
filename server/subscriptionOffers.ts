@@ -68,17 +68,22 @@ export function offerLabel(mode: SubscriptionOfferMode, value: number, unit: Sub
   return `${discount} Subscriptions · ${window}`
 }
 
+export const MIN_SUBSCRIPTION_OFFER_PRICE_CENTS = 50
+
 export function applyOfferCents(
   priceCents: number,
   offer: { mode: SubscriptionOfferMode; value: number } | null,
+  minCents: number = MIN_SUBSCRIPTION_OFFER_PRICE_CENTS,
 ) {
-  const base = Math.max(0, Math.round(priceCents))
+  const base = Math.max(0, Math.round(Number(priceCents) || 0))
   if (!offer || base < 1) return base
+  const floor = Math.max(1, Math.min(base, minCents))
   if (offer.mode === 'percent') {
-    const pct = Math.min(99, Math.max(0, Math.floor(offer.value)))
-    return Math.max(1, Math.round((base * (100 - pct)) / 100))
+    const pct = Math.min(99, Math.max(0, Math.floor(Number(offer.value) || 0)))
+    return Math.max(floor, Math.round((base * (100 - pct)) / 100))
   }
-  return Math.max(1, base - Math.max(0, Math.floor(offer.value)))
+  const discount = Math.max(0, Math.floor(Number(offer.value) || 0))
+  return Math.max(floor, base - discount)
 }
 
 export function getActiveSubscriptionOffer(userId: string): ActiveSubscriptionOffer | null {
@@ -98,6 +103,12 @@ export function getActiveSubscriptionOffer(userId: string): ActiveSubscriptionOf
   if (!Number.isFinite(value) || value < 1) return null
   const label = mode === 'percent' ? `${value}% off` : `$${(value / 100).toFixed(2)} off`
   return { mode, value, expiresAt: row.expires_at, label }
+}
+
+export function consumeSubscriptionOffer(userId: string): boolean {
+  if (!userId) return false
+  const result = db.prepare(`DELETE FROM user_subscription_offers WHERE user_id = ?`).run(userId)
+  return result.changes > 0
 }
 
 export function grantSubscriptionOffer(input: {

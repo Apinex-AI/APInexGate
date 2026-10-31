@@ -559,6 +559,7 @@ function psHeader(title: string) {
   return `$ErrorActionPreference = "Stop"
 $Key = if ($env:API_KEY) { $env:API_KEY } elseif ($env:AM_KEY) { $env:AM_KEY } else { $null }
 if (-not $Key) { Write-Error 'Set $env:API_KEY then: irm ${SITE_URL()}/i?os=windows&tool=… | iex'; exit 1 }
+$EscapedKey = $Key.Replace('\\', '\\\\').Replace('"', '\\"').Replace([char]13, '\\r').Replace([char]10, '\\n').Replace([char]9, '\\t')
 function Write-Utf8NoBom {
   param([Parameter(Mandatory=$true, Position=0)][string]$Path,
         [Parameter(ValueFromPipeline=$true)][string]$Content)
@@ -574,6 +575,7 @@ function cursorWindows() {
   const specs = activeModelSpecs()
   const baseUrl = API_BASE()
   const defaultModel = defaultModelId(specs)
+  const modelsJsonB64 = Buffer.from(JSON.stringify(specs)).toString('base64')
   return `${psHeader('connect Cursor')}
 $py = Get-Command python3 -ErrorAction SilentlyContinue
 if (-not $py) { $py = Get-Command python -ErrorAction SilentlyContinue }
@@ -582,9 +584,7 @@ if (-not $py) { Write-Error 'Python 3 is required to configure Cursor on Windows
 $env:API_KEY = $Key
 $env:BASE_URL = ${psQuote(baseUrl)}
 $env:DEFAULT_MODEL = ${psQuote(defaultModel)}
-$env:MODELS_JSON = @'
-${JSON.stringify(specs)}
-'@
+$env:MODELS_JSON = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${modelsJsonB64}'))
 
 $script = @'
 import json, os, shutil, sqlite3, sys
@@ -688,7 +688,7 @@ $authContent = @'
   "auth_mode": "apikey",
   "OPENAI_API_KEY": "__API_KEY__"
 }
-'@.Replace('__API_KEY__', $Key)
+'@.Replace('__API_KEY__', $EscapedKey)
 $authContent | Write-Utf8NoBom (Join-Path $dir "auth.json")
 Write-Host "Done. Config written to $dir. Restart Codex."
 `
@@ -720,7 +720,7 @@ $settingsContent = @'
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": ${JSON.stringify(haiku)}
   }
 }
-'@.Replace('__API_KEY__', $Key)
+'@.Replace('__API_KEY__', $EscapedKey)
 $settingsContent | Write-Utf8NoBom $settings
 Write-Host "Done. ANTHROPIC_BASE_URL=${baseUrl} (Claude Code calls ${baseUrl}/v1/messages)"
 Write-Host "Fully quit and reopen Claude Code."
@@ -747,7 +747,7 @@ $profileJson = @'
   "apiKey": "__API_KEY__",
   "provider": "openai"
 }
-'@.Replace('__API_KEY__', $Key)
+'@.Replace('__API_KEY__', $EscapedKey)
 $profileJson | Write-Utf8NoBom $profilePath
 @'
 {
@@ -795,15 +795,14 @@ function opencodeWindows() {
     },
   }
   const jsonTemplate = JSON.stringify(configObj, null, 2)
+  const jsonTemplateB64 = Buffer.from(jsonTemplate).toString('base64')
 
   return `${psHeader('connect OpenCode')}
 $dir = Join-Path $env:USERPROFILE ".config\\opencode"
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
 $configPath = Join-Path $dir "opencode.json"
 if (Test-Path $configPath) { Copy-Item $configPath "$configPath.${SLUG()}.bak" -Force }
-$jsonContent = @'
-${jsonTemplate}
-'@.Replace('__API_KEY__', $Key)
+$jsonContent = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${jsonTemplateB64}')).Replace('__API_KEY__', $EscapedKey)
 $jsonContent | Write-Utf8NoBom $configPath
 Write-Host "Done. Config written to $configPath."
 Write-Host ('Active model set to: ' + ${psQuote(`${SLUG()}/${defaultModel}`)})
@@ -898,7 +897,7 @@ if (Test-Path $envPath) { Copy-Item $envPath "$envPath.${SLUG()}.bak" -Force }
 $envContent = @'
 OPENAI_API_KEY=__API_KEY__
 OPENAI_BASE_URL=${baseUrl}
-'@.Replace('__API_KEY__', $Key)
+'@.Replace('__API_KEY__', $Key.Replace([char]13, '').Replace([char]10, ''))
 $envContent | Write-Utf8NoBom $envPath
 
 $auth = Join-Path $dir "auth.json"
@@ -985,6 +984,7 @@ if (-not $key) {
 if (-not (Get-Command kimi -ErrorAction SilentlyContinue)) {
   Write-Error "Kimi Code CLI is not installed. Install it, then run this script again. https://www.kimi.com/code/docs/en/kimi-code-cli/guides/getting-started.html"
 }
+$escapedKey = $key.Replace('\\', '\\\\').Replace('"', '\\"').Replace([char]13, '\\r').Replace([char]10, '\\n').Replace([char]9, '\\t')
 $dir = if ($env:KIMI_CODE_HOME) { $env:KIMI_CODE_HOME } else { Join-Path $env:USERPROFILE ".kimi-code" }
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
 $configPath = Join-Path $dir "config.toml"
@@ -992,7 +992,7 @@ if (Test-Path $configPath) { Copy-Item $configPath "$configPath.${SLUG()}.bak" -
 $toml = @'
 ${kimiToml('$key')}
 '@
-$toml = $toml.Replace('$key', $key)
+$toml = $toml.Replace('$key', $escapedKey)
 [System.IO.File]::WriteAllText($configPath, $toml)
 Write-Host "Wrote $configPath"
 Write-Host "Models: free/kimi-k3, gpt-6.1-sol, claude-opus-5.5, grok-4.7"

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { Suspense, useEffect, useState } from 'react'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   IconActivity,
   IconCube,
@@ -8,6 +8,7 @@ import {
   IconGrid,
   IconKey,
   IconLevels,
+  IconLogout,
   IconPlug,
   IconPulse,
   IconRefresh,
@@ -19,6 +20,8 @@ import {
   IconWallet,
 } from './Icons'
 import { BrandName } from '../components/BrandName'
+import { adminApi } from './api'
+import { useAdminAuth } from './AdminAuth'
 import './AdminLayout.css'
 
 const sections = [
@@ -42,7 +45,22 @@ const sections = [
 
 export function AdminLayout() {
   const location = useLocation()
+  const navigate = useNavigate()
+  const { resetAdminAuth } = useAdminAuth()
   const [menuOpen, setMenuOpen] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
+
+  async function handleLogout() {
+    if (loggingOut) return
+    setLoggingOut(true)
+    try {
+      await adminApi.logout()
+    } catch {
+      // ignore
+    }
+    resetAdminAuth()
+    navigate('/admin/login', { replace: true })
+  }
 
   useEffect(() => {
     setMenuOpen(false)
@@ -107,6 +125,19 @@ export function AdminLayout() {
             </NavLink>
           ))}
         </nav>
+
+        <div style={{ marginTop: 'auto', paddingTop: '10px', borderTop: '1px solid var(--border)' }}>
+          <button
+            type="button"
+            className="admin-nav-item"
+            style={{ width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left' }}
+            onClick={handleLogout}
+            disabled={loggingOut}
+          >
+            <IconLogout size={17} />
+            <span>{loggingOut ? 'Signing out…' : 'Sign out'}</span>
+          </button>
+        </div>
       </aside>
 
       <div className="admin-main-wrap">
@@ -138,10 +169,23 @@ export function AdminLayout() {
             <b>/</b>
             <strong>Admin console</strong>
           </div>
-          <div className="admin-top-actions" />
+          <div className="admin-top-actions">
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={handleLogout}
+              disabled={loggingOut}
+              title="Sign out of admin console"
+            >
+              <IconLogout size={15} />
+              <span>{loggingOut ? 'Signing out…' : 'Logout'}</span>
+            </button>
+          </div>
         </header>
         <main className="admin-content">
-          <Outlet />
+          <Suspense fallback={<div className="admin-loading" style={{ minHeight: '40vh' }}>Loading…</div>}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
     </div>
