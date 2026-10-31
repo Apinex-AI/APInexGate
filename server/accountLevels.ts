@@ -67,15 +67,18 @@ function ensureSchema() {
 ensureSchema()
 
 function loadRow(userId: string): ProgressRow {
-  const row = db
-    .prepare(`SELECT user_id, level, progress_cents, seen_level FROM user_level_progress WHERE user_id = ?`)
-    .get(userId) as ProgressRow | undefined
+  const select = db.prepare(
+    `SELECT user_id, level, progress_cents, seen_level FROM user_level_progress WHERE user_id = ?`,
+  )
+  const row = select.get(userId) as ProgressRow | undefined
   if (row) return row
+
   db.prepare(
-    `INSERT INTO user_level_progress (user_id, level, progress_cents, seen_level, updated_at)
+    `INSERT OR IGNORE INTO user_level_progress (user_id, level, progress_cents, seen_level, updated_at)
      VALUES (?, 1, 0, 1, ?)`,
   ).run(userId, nowIso())
-  return { user_id: userId, level: 1, progress_cents: 0, seen_level: 1 }
+
+  return (select.get(userId) as ProgressRow) ?? { user_id: userId, level: 1, progress_cents: 0, seen_level: 1 }
 }
 
 function toState(row: ProgressRow, levels = getLevelSettings()): AccountLevelState {

@@ -2716,30 +2716,6 @@ export async function registerRoutes(app: FastifyInstance) {
     return { ok: true, minTopupCents: cents }
   })
 
-  app.patch('/api/admin/settings/telegram-bonus', async (request, reply) => {
-    const actor = requireAuth(request, reply)
-    if (!actor) return
-    return { ok: true, settings: { enabled: false, bonusTokens: 0, bonusUsd: 0 } }
-  })
-
-  app.get('/api/admin/telegram/broadcast/audience', async (request, reply) => {
-    const actor = requireAuth(request, reply)
-    if (!actor) return
-    return { reachable: 0, configured: false }
-  })
-
-  app.get<{ Params: { id: string } }>('/api/admin/telegram/broadcasts/:id', async (request, reply) => {
-    const actor = requireAuth(request, reply)
-    if (!actor) return
-    return reply.code(404).send({ error: 'Broadcast not found' })
-  })
-
-  app.post('/api/admin/telegram/broadcast', async (request, reply) => {
-    const actor = requireAuth(request, reply)
-    if (!actor) return
-    return reply.code(400).send({ error: 'Telegram broadcasts are disabled' })
-  })
-
   app.get<{
     Querystring: { q?: string; period?: string; from?: string; to?: string }
   }>('/api/admin/statistics', async (request, reply) => {

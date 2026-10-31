@@ -591,3 +591,51 @@ test('7. [HIGH-01, HIGH-02, HIGH-03, HIGH-04, HIGH-14, HIGH-15] Security & Concu
   const insertedUser = db.prepare('SELECT display_id FROM users WHERE id = ?').get(newUserId) as { display_id: number }
   assert.equal(insertedUser.display_id, curDisplayId + 1)
 })
+
+test('8. Verification of medium fixes: Gmail normalization, 30-day sessions, accountLevels concurrency, and activity logs without rclone', async () => {
+  const now = nowIso()
+  const { canonicalizeEmail, isEmailBlocked, blockEmail } = await import('../server/blockedEmails.js')
+  const { USER_SESSION_TTL_MS, createUserSession } = await import('../server/auth.js')
+  const { getAccountLevel } = await import('../server/accountLevels.js')
+  const { rotateActivityLogs } = await import('../server/userActivityLog.js')
+
+  // 1. Gmail normalization & bypass prevention
+  assert.equal(canonicalizeEmail('test.user+promo@gmail.com'), 'testuser@gmail.com')
+  assert.equal(canonicalizeEmail('t.e.s.t@googlemail.com'), 'test@gmail.com')
+  assert.equal(canonicalizeEmail('StandardUser@domain.com'), 'standarduser@domain.com')
+
+  const testEmail = 'bad.actor+promo@gmail.com'
+  blockEmail(testEmail)
+  assert.equal(isEmailBlocked('badactor@gmail.com'), true, 'Stripped dots must match blocked email')
+  assert.equal(isEmailBlocked('b.a.d.a.c.t.o.r+anytag@gmail.com'), true, 'Any dot/plus variant must be blocked')
+
+  // 2. 30-day session TTL
+  assert.equal(USER_SESSION_TTL_MS, 30 * 24 * 60 * 60 * 1000, 'User session TTL must be exactly 30 days')
+  const testUserId = id('u_session_ttl')
+  db.prepare(`
+    INSERT INTO users (id, name, email, plan, status, balance_tokens, requests, created_at)
+    VALUES (?, 'SessionTest', ?, 'default', 'active', 0, 0, ?)
+  `).run(testUserId, `${testUserId}@example.invalid`, now)
+  const session = createUserSession(testUserId)
+  const expiresMs = Date.parse(session.expiresAt)
+  const expectedMin = Date.now() + 29 * 24 * 60 * 60 * 1000
+  const expectedMax = Date.now() + 31 * 24 * 60 * 60 * 1000
+  assert.ok(expiresMs >= expectedMin && expiresMs <= expectedMax, 'Session expiration must be ~30 days in the future')
+
+  // 3. accountLevels concurrency / first request race condition
+  const newUserId = id('u_level_race')
+  db.prepare(`
+    INSERT INTO users (id, name, email, plan, status, balance_tokens, requests, created_at)
+    VALUES (?, 'LevelTest', ?, 'default', 'active', 0, 0, ?)
+  `).run(newUserId, `${newUserId}@example.invalid`, now)
+  const [level1, level2] = await Promise.all([
+    Promise.resolve().then(() => getAccountLevel(newUserId)),
+    Promise.resolve().then(() => getAccountLevel(newUserId)),
+  ])
+  assert.equal(level1.level, 1)
+  assert.equal(level2.level, 1)
+
+  // 4. rotateActivityLogs runs without error and without rclone
+  const rotateRes = await rotateActivityLogs('test')
+  assert.ok(rotateRes.ok || rotateRes.skipped, 'Activity log rotation must complete without rclone')
+})

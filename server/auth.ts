@@ -5,7 +5,9 @@ import { db, nowIso, touchUserLastSeen } from './db.js'
 export const ADMIN_SESSION_COOKIE = 'admin_session'
 export const USER_SESSION_COOKIE = 'user_session'
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000
-/** Customer sessions do not auto-expire (persist until logout). */
+/** Customer sessions valid for 30 days. */
+export const USER_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000
+/** @deprecated Kept for backwards compatibility */
 export const USER_SESSION_EXPIRES_AT = '9999-12-31T23:59:59.000Z'
 
 function cookieDomain(): string | undefined {
@@ -74,7 +76,7 @@ export function createAdminSession(adminId: string) {
 
 export function createUserSession(userId: string) {
   const sessionId = randomBytes(32).toString('hex')
-  const expiresAt = USER_SESSION_EXPIRES_AT
+  const expiresAt = new Date(Date.now() + USER_SESSION_TTL_MS).toISOString()
   db.prepare(
     'INSERT INTO user_sessions (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)',
   ).run(sessionId, userId, expiresAt, nowIso())
@@ -174,6 +176,12 @@ export function getCustomerSessionUser(request: FastifyRequest) {
     return null
   }
 
+  // Enforce session expiration
+  if (session.expires_at && Date.parse(session.expires_at) <= Date.now()) {
+    destroyUserSession(sessionId)
+    return null
+  }
+
   if (session.status === 'suspended' || session.status === 'pending') {
     destroyUserSession(sessionId)
     return null
@@ -207,11 +215,12 @@ export function clearAdminSessionCookie(reply: FastifyReply) {
   reply.clearCookie(ADMIN_SESSION_COOKIE, cookieBase)
 }
 
-export function setUserSessionCookie(reply: FastifyReply, sessionId: string, _expiresAt?: string) {
+export function setUserSessionCookie(reply: FastifyReply, sessionId: string, expiresAt?: string) {
+  const expiry = expiresAt ? new Date(expiresAt) : new Date(Date.now() + USER_SESSION_TTL_MS)
   reply.setCookie(USER_SESSION_COOKIE, sessionId, {
     ...userCookieBase,
-    // Persistent until explicit logout (browsers may clamp maxAge).
-    expires: new Date(USER_SESSION_EXPIRES_AT),
+    expires: expiry,
+    maxAge: Math.floor(USER_SESSION_TTL_MS / 1000),
   })
 }
 

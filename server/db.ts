@@ -887,13 +887,7 @@ if (getSetting('model_routes_initialized_v2') !== '1') {
 }
 
 
-// Customer sessions persist until logout. Rewrite only rows that still have an old expiry,
-// otherwise every boot rewrites the whole table and delays listen on the production DB.
-db.prepare(
-  `UPDATE user_sessions
-   SET expires_at = '9999-12-31T23:59:59.000Z'
-   WHERE expires_at IS NULL OR expires_at < '9999-12-31T23:59:59.000Z'`,
-).run()
+
 
 export function nowIso() {
   return new Date().toISOString()
@@ -1056,8 +1050,20 @@ export function getMinTopupCents() {
   return Math.round(raw)
 }
 
+const userLastSeenThrottle = new Map<string, number>()
+const USER_SEEN_THROTTLE_MS = 5 * 60 * 1000 // 5 minutes
+
 export function touchUserLastSeen(userId: string) {
   if (!userId) return
+  const now = Date.now()
+  const last = userLastSeenThrottle.get(userId)
+  if (last && now - last < USER_SEEN_THROTTLE_MS) return
+  userLastSeenThrottle.set(userId, now)
+  if (userLastSeenThrottle.size > 10_000) {
+    for (const [k, v] of userLastSeenThrottle) {
+      if (now - v > USER_SEEN_THROTTLE_MS * 2) userLastSeenThrottle.delete(k)
+    }
+  }
   try {
     db.prepare('UPDATE users SET last_seen_at = ? WHERE id = ?').run(nowIso(), userId)
   } catch {

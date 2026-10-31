@@ -227,6 +227,27 @@ function extractApiSecret(request: FastifyRequest) {
   return null
 }
 
+const apiKeyLastUsedThrottle = new Map<string, number>()
+const KEY_USED_THROTTLE_MS = 5 * 60 * 1000
+
+function touchApiKeyLastUsed(keyId: string) {
+  if (!keyId) return
+  const now = Date.now()
+  const last = apiKeyLastUsedThrottle.get(keyId)
+  if (last && now - last < KEY_USED_THROTTLE_MS) return
+  apiKeyLastUsedThrottle.set(keyId, now)
+  if (apiKeyLastUsedThrottle.size > 10_000) {
+    for (const [k, v] of apiKeyLastUsedThrottle) {
+      if (now - v > KEY_USED_THROTTLE_MS * 2) apiKeyLastUsedThrottle.delete(k)
+    }
+  }
+  try {
+    db.prepare('UPDATE api_keys SET last_used_at = ? WHERE id = ?').run(nowIso(), keyId)
+  } catch {
+    /* ignore */
+  }
+}
+
 function authenticateApiKey(request: FastifyRequest): AuthResult {
   const secret = extractApiSecret(request)
   if (!secret) return { error: 'Missing API key (Bearer or x-api-key)', status: 401 }
@@ -258,11 +279,7 @@ function authenticateApiKey(request: FastifyRequest): AuthResult {
   }
 
   touchUserLastSeen(user.id)
-  try {
-    db.prepare('UPDATE api_keys SET last_used_at = ? WHERE id = ?').run(nowIso(), key.id)
-  } catch {
-    /* ignore */
-  }
+  touchApiKeyLastUsed(key.id)
 
   return { key, user }
 }
@@ -3052,7 +3069,20 @@ async function proxyDecisionRequest(input: {
   }
 
   let reservationSettled = false
+  let slotAcquired = false
   try {
+    const dispatch = await acquireDispatchSlot(auth.user.id, {
+      priority: !freeModel,
+      signal: clientAbortController.signal,
+    })
+    if (dispatch.timedOut) {
+      request.raw.off('close', onClientClose)
+      reply.raw.off('close', onClientClose)
+      releaseReservation(reservation.reservationId)
+      return sendError(429, 'Model is busy. Please slow down and retry in a moment.', 'rate_limit_error')
+    }
+    slotAcquired = true
+
     const payload = buildDecisionPayload(body, upstreamModelId)
     const baseUrls = baseUrlsForUpstream('apinex')
     let lastStatus = 502
@@ -3162,6 +3192,9 @@ async function proxyDecisionRequest(input: {
           : 502
     return sendError(responseStatus, clientSafeUpstreamError(responseStatus, lastError), 'api_error')
   } finally {
+    if (slotAcquired) {
+      releaseDispatchSlot()
+    }
     request.raw.off('close', onClientClose)
     reply.raw.off('close', onClientClose)
     if (!reservationSettled) {

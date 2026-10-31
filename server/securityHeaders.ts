@@ -31,6 +31,11 @@ export function registerSecurityHeaders(app: FastifyInstance) {
     reply.header('Referrer-Policy', 'strict-origin-when-cross-origin')
     reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
     reply.header('Cross-Origin-Opener-Policy', 'same-origin')
+    reply.header('Cross-Origin-Resource-Policy', 'same-origin')
+    reply.header(
+      'Content-Security-Policy',
+      "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https: blob:; connect-src 'self' https: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self';",
+    )
     // Only force HSTS on HTTPS terminations (prod behind TLS proxy still benefits when forwarded).
     const proto = String(request.headers['x-forwarded-proto'] ?? '').split(',')[0]?.trim()
     if (proto === 'https' || process.env.NODE_ENV === 'production') {

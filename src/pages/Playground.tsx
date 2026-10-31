@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Modal } from '../components/Modal'
 import { userApi, type CustomerModel } from '../auth/userApi'
 import { ProviderIcon } from '../components/ProviderIcon'
+import { useToast } from '../components/Toast'
 import './Playground.css'
 
 type ChatModel = CustomerModel & { free: boolean; priceLabel: string }
@@ -173,8 +174,20 @@ function userContent(text: string, files: Attachment[]): string | Array<Record<s
 function markdownToHtml(raw: string) {
   const fences: string[] = []
   let html = raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  html = html.replace(/```[a-z0-9]*\n?([\s\S]*?)```/gi, (_match, code: string) => {
-    fences.push(`<pre><code>${code.replace(/\n$/, '')}</code></pre>`)
+  html = html.replace(/```([a-z0-9_-]*)\n?([\s\S]*?)```/gi, (_match, lang: string, code: string) => {
+    const displayLang = (lang || '').trim() || 'code'
+    fences.push(
+      `<div class="playground-code-frame">` +
+        `<div class="playground-code-bar">` +
+          `<span class="playground-code-lang">${displayLang}</span>` +
+          `<button type="button" class="playground-code-copy-btn" title="Copy code snippet">` +
+            `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>` +
+            `<span class="playground-code-copy-label">Copy</span>` +
+          `</button>` +
+        `</div>` +
+        `<pre><code>${code.replace(/\n$/, '')}</code></pre>` +
+      `</div>`,
+    )
     return `@@FENCE_${fences.length - 1}@@`
   })
   html = html.replace(/`([^`\n]+)`/g, '<code>$1</code>')
@@ -187,7 +200,11 @@ function markdownToHtml(raw: string) {
   html = html.replace(/(?:<li>[\s\S]*?<\/li>\n?)+/g, (list) => `<ul>${list}</ul>`)
   html = html
     .split(/\n{2,}/)
-    .map((part) => (part.startsWith('<h') || part.startsWith('<ul') || part.startsWith('<pre') ? part : `<p>${part.replace(/\n/g, '<br>')}</p>`))
+    .map((part) =>
+      part.startsWith('<h') || part.startsWith('<ul') || part.startsWith('<div class="playground-code-frame')
+        ? part
+        : `<p>${part.replace(/\n/g, '<br>')}</p>`,
+    )
     .join('')
   return html.replace(/@@FENCE_(\d+)@@/g, (_m, index: string) => fences[Number(index)] ?? '')
 }
@@ -248,6 +265,7 @@ function FileChips({
 }
 
 export function Playground() {
+  const { toast } = useToast()
   const [chatModels, setChatModels] = useState<ChatModel[]>([])
   const [chatModel, setChatModel] = useState('')
   const [loadError, setLoadError] = useState('')
@@ -258,6 +276,34 @@ export function Playground() {
   const [chatId, setChatId] = useState<string>(() => crypto.randomUUID())
   const [historyOpen, setHistoryOpen] = useState(false)
   const [modelOpen, setModelOpen] = useState(false)
+  const [copiedTurnId, setCopiedTurnId] = useState<string | null>(null)
+
+  const handleCopyFullResponse = (text: string, turnId: string) => {
+    if (!text) return
+    void navigator.clipboard?.writeText(text)
+    setCopiedTurnId(turnId)
+    toast('Full response copied!')
+    setTimeout(() => setCopiedTurnId((curr: string | null) => (curr === turnId ? null : curr)), 2000)
+  }
+
+  const handleContentClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const target = (e.target as HTMLElement).closest('.playground-code-copy-btn')
+    if (!target) return
+    const frame = target.closest('.playground-code-frame')
+    const codeEl = frame?.querySelector('pre code')
+    if (codeEl) {
+      const text = codeEl.textContent || ''
+      void navigator.clipboard?.writeText(text)
+      target.classList.add('is-copied')
+      const label = target.querySelector('.playground-code-copy-label')
+      if (label) label.textContent = 'Copied!'
+      toast('Code copied to clipboard!')
+      setTimeout(() => {
+        target.classList.remove('is-copied')
+        if (label) label.textContent = 'Copy'
+      }, 2000)
+    }
+  }
   const [previewSrc, setPreviewSrc] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const [history, setHistory] = useState<SavedChat[]>(() => loadHistory())
@@ -482,6 +528,23 @@ export function Playground() {
     abortRef.current?.abort()
   }
 
+  function loadDemoTurn() {
+    setTurns([
+      {
+        id: crypto.randomUUID(),
+        role: 'user',
+        text: 'Напиши функцию на Python для вычисления факториала числа и пример использования.',
+      },
+      {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        text: 'Вот функция для вычисления факториала на Python:\n\n```python\ndef factorial(n: int) -> int:\n    if n < 0:\n        raise ValueError("Факториал определен только для неотрицательных чисел")\n    return 1 if n <= 1 else n * factorial(n - 1)\n\n# Пример вызова:\nprint(factorial(5))  # Выведет 120\n```\n\nФункция использует рекурсию и работает за время O(n).',
+        seconds: 0.85,
+        meta: { free: true, costTokens: 120 },
+      },
+    ])
+  }
+
   const selected = chatModels.find((item) => item.id === chatModel)
 
   return (
@@ -493,6 +556,15 @@ export function Playground() {
           </div>
 
           <div className="playground-head-actions">
+            <button
+              type="button"
+              className="btn btn-secondary playground-action-btn"
+              onClick={loadDemoTurn}
+              title="Load sample message with code to test copy buttons"
+            >
+              <span>Demo Message</span>
+            </button>
+
             <button
               type="button"
               className="btn btn-secondary playground-action-btn"
@@ -589,7 +661,23 @@ export function Playground() {
         ) : (
           turns.map((turn) => (
             <article key={turn.id} className={`playground-msg playground-msg-${turn.role}`}>
-              <header>{turn.role === 'user' ? 'You' : 'Assistant'}</header>
+              <header className="playground-msg-header">
+                <span>{turn.role === 'user' ? 'You' : 'Assistant'}</span>
+                {turn.role === 'assistant' && turn.text && !turn.streaming ? (
+                  <button
+                    type="button"
+                    className="playground-msg-copy-btn"
+                    onClick={() => handleCopyFullResponse(turn.text, turn.id)}
+                    title="Copy full response"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                    </svg>
+                    <span>{copiedTurnId === turn.id ? 'Copied!' : 'Copy response'}</span>
+                  </button>
+                ) : null}
+              </header>
               {turn.role === 'user' ? (
                 <>
                   {turn.attachments ? <FileChips files={turn.attachments} onPreview={setPreviewSrc} /> : null}
@@ -601,7 +689,11 @@ export function Playground() {
                   <ErrorText message={turn.error.message} />
                 </div>
               ) : (
-                <div className="playground-md" dangerouslySetInnerHTML={{ __html: markdownToHtml(turn.text) }} />
+                <div
+                  className="playground-md"
+                  onClick={handleContentClick}
+                  dangerouslySetInnerHTML={{ __html: markdownToHtml(turn.text) }}
+                />
               )}
               {turn.role === 'assistant' ? (
                 <footer>
@@ -654,7 +746,7 @@ export function Playground() {
               </svg>
             </button>
             <div className="playground-model-pick" ref={modelPickRef}>
-              <button type="button" className="playground-model-btn" onClick={() => setModelOpen((open) => !open)}>
+              <button type="button" className="playground-model-btn" onClick={() => setModelOpen((open: boolean) => !open)}>
                 {selected && (
                   <span className="playground-model-btn-icon" aria-hidden>
                     <ProviderIcon provider={selected.provider} modelId={selected.id} size={15} />

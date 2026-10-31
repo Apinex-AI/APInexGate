@@ -1,5 +1,7 @@
 import {
   appendFileSync,
+  createReadStream,
+  createWriteStream,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -10,7 +12,8 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { spawnSync } from 'node:child_process'
+import { createGzip } from 'node:zlib'
+import { pipeline } from 'node:stream/promises'
 import { db, nowIso } from './db.js'
 
 /** Soft local cap before rotate + upload (user requested ≤ 5GB). */
@@ -222,10 +225,10 @@ export function activityLogStatus() {
 }
 
 /**
- * Rotate current NDJSON → tar.gz, upload via rclone to Google Drive /Logs, delete local.
+ * Rotate current NDJSON to local compressed archive (no external cloud/rclone uploads).
  * Safe to call from cron or when size exceeds the soft cap.
  */
-export function rotateActivityLogs(reason = 'manual') {
+export async function rotateActivityLogs(reason = 'manual') {
   ensureDir()
   if (rotating) return { ok: false, skipped: true, reason: 'already-rotating' }
   if (Date.now() - lastRotateAt < ROTATE_COOLDOWN_MS) {
@@ -253,19 +256,21 @@ export function rotateActivityLogs(reason = 'manual') {
     const baseName = `activity-${startStamp}_to_${endStamp}`
     const dir = logsDir()
     const staged = join(dir, `${baseName}.ndjson`)
-    const archive = join(dir, `${baseName}.tar.gz`)
+    const archive = join(dir, `${baseName}.ndjson.gz`)
 
     renameSync(file, staged)
     writeFileSync(file, '', 'utf8')
     writeMeta({ startedAt: endedAt, bytesApprox: 0 })
 
-    const tar = spawnSync(
-      'tar',
-      ['-C', dir, '-czf', archive, `${baseName}.ndjson`],
-      { encoding: 'utf8' },
-    )
-    if (tar.status !== 0) {
-      // Put the staged file back if archive failed.
+    // Compress using native Node.js async streams without blocking the event loop or spawning external processes
+    try {
+      const gzip = createGzip()
+      const source = createReadStream(staged)
+      const destination = createWriteStream(archive)
+      await pipeline(source, gzip, destination)
+      rmSync(staged, { force: true })
+    } catch (compressErr) {
+      // Put staged file back if compression fails
       try {
         if (!existsSync(file) || statSync(file).size === 0) {
           renameSync(staged, file)
@@ -274,56 +279,14 @@ export function rotateActivityLogs(reason = 'manual') {
       } catch {
         /* ignore */
       }
-      throw new Error(tar.stderr || tar.stdout || 'tar failed')
+      throw compressErr
     }
 
-    rmSync(staged, { force: true })
-
-    const remote =
-      process.env.ACTIVITY_RCLONE_REMOTE?.trim() ||
-      (process.env.RCLONE_REMOTE?.trim()
-        ? `${process.env.RCLONE_REMOTE.trim().replace(/\/?$/, '')}/Logs`
-        : '')
-
-    if (remote) {
-      const rcloneBin = process.env.RCLONE_BIN || 'rclone'
-      const up = spawnSync(
-        rcloneBin,
-        [
-          'copyto',
-          archive,
-          `${remote}/${baseName}.tar.gz`,
-          '--retries',
-          '3',
-          '--low-level-retries',
-          '10',
-          '--log-level',
-          'INFO',
-        ],
-        { encoding: 'utf8' },
-      )
-
-      if (up.status !== 0) {
-        // Keep archive locally for retry; do not delete.
-        console.error('[activity-log] rclone upload failed', up.stderr || up.stdout)
-        return {
-          ok: false,
-          skipped: false,
-          reason: 'rclone-failed',
-          archive,
-          error: up.stderr || up.stdout || 'rclone failed',
-          trigger: reason,
-        }
-      }
-
-      rmSync(archive, { force: true })
-    }
-
-    // Optional cleanup of leftover local archives older than keep window.
+    // Local cleanup of old archives
     const keepDays = Number(process.env.ACTIVITY_LOG_KEEP_DAYS || 14)
     try {
       for (const name of readdirSync(dir)) {
-        if (!name.endsWith('.tar.gz')) continue
+        if (!name.endsWith('.ndjson.gz') && !name.endsWith('.tar.gz')) continue
         const p = join(dir, name)
         const ageMs = Date.now() - statSync(p).mtimeMs
         if (ageMs > keepDays * DAY_MS) rmSync(p, { force: true })
@@ -332,7 +295,7 @@ export function rotateActivityLogs(reason = 'manual') {
       /* ignore */
     }
 
-    console.info(`[activity-log] rotated and uploaded ${baseName}.tar.gz (${reason})`)
+    console.info(`[activity-log] rotated ${baseName}.ndjson.gz (${reason})`)
     return { ok: true, skipped: false, name: baseName, trigger: reason, bytes: size }
   } catch (error) {
     console.error('[activity-log] rotate failed', error)
