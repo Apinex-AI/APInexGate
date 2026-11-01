@@ -171,7 +171,7 @@ export const RL = {
   resendIp: { limit: 4, windowMs: SHORT },
   verifyIp: { limit: 6, windowMs: SHORT },
   resetIp: { limit: 5, windowMs: SHORT },
-  googleStartIp: { limit: 5, windowMs: SHORT },
+  googleStartIp: { limit: 15, windowMs: SHORT },
   challengeIp: { limit: 40, windowMs: SHORT },
   logoutIp: { limit: 8, windowMs: SHORT },
   keysCreateUser: { limit: 4, windowMs: SHORT },

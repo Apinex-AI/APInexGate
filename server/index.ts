@@ -17,6 +17,7 @@ import { sanitizeErrorMessage } from './upstreamFallback.js'
 importCatalogFiles()
 
 const app = Fastify({
+  trustProxy: true,
   logger: {
     serializers: {
       req(request) {
@@ -36,6 +37,7 @@ export function sanitizeJsonControlCharacters(str: string): string {
   }
 
   // Fast path: if there are no raw control characters at all, return str as-is.
+  // eslint-disable-next-line no-control-regex
   if (!/[\u0000-\u001f]/.test(str)) {
     return str
   }

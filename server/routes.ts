@@ -139,7 +139,7 @@ import {
   siteBaseUrl,
   statesMatch,
 } from './googleAuth.js'
-import { enforceRateLimit, rateLimitKey, RL } from './rateLimit.js'
+import { clientIp, enforceRateLimit, rateLimitKey, RL } from './rateLimit.js'
 
 import {
   buildInstallScript,
@@ -386,7 +386,7 @@ export async function registerRoutes(app: FastifyInstance) {
     if (
       !enforceRateLimit(
         reply,
-        rateLimitKey(['public-status', request.ip]),
+        rateLimitKey(['public-status', clientIp(request)]),
         RL.publicStatusIp.limit,
         RL.publicStatusIp.windowMs,
         'Too many status checks. Slow down.',
@@ -508,7 +508,7 @@ export async function registerRoutes(app: FastifyInstance) {
     if (
       !enforceRateLimit(
         reply,
-        rateLimitKey(['install', request.ip]),
+        rateLimitKey(['install', clientIp(request)]),
         RL.installIp.limit,
         RL.installIp.windowMs,
         'Too many install script requests',
@@ -538,7 +538,7 @@ export async function registerRoutes(app: FastifyInstance) {
     if (
       !enforceRateLimit(
         reply,
-        rateLimitKey(['admin-login', request.ip]),
+        rateLimitKey(['admin-login', clientIp(request)]),
         RL.adminLoginIp.limit,
         RL.adminLoginIp.windowMs,
         'Too many login attempts. Try again later.',
@@ -584,7 +584,7 @@ export async function registerRoutes(app: FastifyInstance) {
     if (
       !enforceRateLimit(
         reply,
-        rateLimitKey(['admin-logout', request.ip]),
+        rateLimitKey(['admin-logout', clientIp(request)]),
         RL.logoutIp.limit,
         RL.logoutIp.windowMs,
         'Too many logout requests. Try again shortly.',
@@ -614,7 +614,7 @@ export async function registerRoutes(app: FastifyInstance) {
     if (
       !enforceRateLimit(
         reply,
-        rateLimitKey(['auth-challenge', request.ip]),
+        rateLimitKey(['auth-challenge', clientIp(request)]),
         RL.challengeIp.limit,
         RL.challengeIp.windowMs,
       )
@@ -637,7 +637,7 @@ export async function registerRoutes(app: FastifyInstance) {
     if (
       !enforceRateLimit(
         reply,
-        rateLimitKey(['google-start', request.ip]),
+        rateLimitKey(['google-start', clientIp(request)]),
         RL.googleStartIp.limit,
         RL.googleStartIp.windowMs,
         'Too many Google sign-in attempts. Try again later.',
@@ -834,7 +834,7 @@ export async function registerRoutes(app: FastifyInstance) {
     if (
       !enforceRateLimit(
         reply,
-        rateLimitKey(['user-logout', request.ip]),
+        rateLimitKey(['user-logout', clientIp(request)]),
         RL.logoutIp.limit,
         RL.logoutIp.windowMs,
         'Too many logout requests. Try again shortly.',
